@@ -1,0 +1,17 @@
+/** 테스트 모드용 위젯 명세. 실제 서버의 GET /widgets 응답과 같은 형태다. */
+export const WIDGET_SPECS = [
+  { key: 'notice', name: '공지사항', category: '기능형', description: '기관 게시판에서 수집한 공지사항 목록', data_driven: true, refresh_sec: 600, default_size: { w: 700, h: 500 }, options: [] },
+  { key: 'newsletter', name: '가정통신문', category: '기능형', description: '기관 게시판에서 수집한 가정통신문 목록', data_driven: true, refresh_sec: 600, default_size: { w: 700, h: 500 }, options: [] },
+  { key: 'school_calendar', name: '학사일정', category: '기능형', description: '월별 학사일정', data_driven: true, refresh_sec: 3600, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'meal', name: '급식메뉴', category: '기능형', description: '오늘의 급식 식단', data_driven: true, refresh_sec: 3600, default_size: { w: 500, h: 600 }, options: [] },
+  { key: 'timetable', name: '시간표', category: '기능형', description: '학급 시간표', data_driven: true, refresh_sec: 3600, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'dday', name: 'D-Day', category: '기능형', description: '지정한 날짜까지 남은 일수', data_driven: false, refresh_sec: 300, default_size: { w: 400, h: 200 }, options: [{ key: 'label', label: '표시 문구', type: 'text', default: 'D-Day', required: true, choices: [] }, { key: 'target_date', label: '목표 일자', type: 'text', default: null, required: true, choices: [] }] },
+  { key: 'painting', name: '명화', category: '기능형', description: '명화 이미지와 설명', data_driven: true, refresh_sec: 86400, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'quote', name: '명언', category: '기능형', description: '오늘의 명언', data_driven: true, refresh_sec: 86400, default_size: { w: 800, h: 250 }, options: [] },
+  { key: 'english_word', name: '영단어', category: '기능형', description: '오늘의 영단어', data_driven: true, refresh_sec: 86400, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'english_idiom', name: '영숙어', category: '기능형', description: '오늘의 영숙어', data_driven: true, refresh_sec: 86400, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'clock', name: '시계', category: '기능형', description: '현재 시각', data_driven: false, refresh_sec: 300, default_size: { w: 400, h: 200 }, options: [{ key: 'format', label: '형식', type: 'select', default: 'HH:mm:ss', required: false, choices: [{ value: 'HH:mm', label: '시:분' }, { value: 'HH:mm:ss', label: '시:분:초' }] }] },
+  { key: 'weather', name: '날씨', category: '기능형', description: '기관 위치 기준 현재 날씨', data_driven: true, refresh_sec: 1800, default_size: { w: 600, h: 400 }, options: [] },
+  { key: 'album', name: '이미지앨범', category: '콘텐츠형', description: '여러 이미지를 정한 간격으로 넘겨 표출', data_driven: false, refresh_sec: 300, default_size: { w: 800, h: 600 }, options: [{ key: 'images', label: '이미지', type: 'image_list', default: [], required: true, choices: [] }, { key: 'interval_sec', label: '넘김 간격(초)', type: 'number', default: 8, min: 1, max: 3600, required: false, choices: [] }, { key: 'transition', label: '전환 효과', type: 'transition', default: 'none', required: false, choices: [] }, { key: 'transition_ms', label: '전환 시간(ms)', type: 'number', default: 600, min: 100, max: 5000, required: false, choices: [] }, { key: 'fit', label: '채우는 방식', type: 'select', default: 'cover', required: false, choices: [{ value: 'cover', label: '화면 채우기(잘릴 수 있음)' }, { value: 'contain', label: '전체 보이기(여백이 생김)' }] }] },
+  { key: 'ai_image', name: 'AI 생성 이미지', category: '콘텐츠형', description: '프롬프트로 생성한 이미지', data_driven: false, refresh_sec: 300, default_size: { w: 600, h: 400 }, options: [{ key: 'prompt', label: '프롬프트', type: 'text', default: null, required: true, choices: [] }] },
+]

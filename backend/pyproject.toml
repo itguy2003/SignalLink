@@ -1,0 +1,31 @@
+[project]
+name = "signallink-backend"
+version = "0.1.0"
+description = "SignalLink Green CMS 백엔드"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:passlib.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+ignore = [
+    "ANN401",  # Any 허용 (콘텐츠 JSON 등)
+    "B008",    # FastAPI 의 Depends/Query 기본값 패턴
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN", "E501"]
+"alembic/*" = ["ANN", "E501"]
+# 시드 스크립트는 데이터를 늘어놓는 곳이다. 타입 주석과 인자 수 제한을
+# 지키느라 읽기 어려워지는 것보다, 데이터가 한눈에 보이는 편이 낫다.
+"scripts/*" = ["ANN", "E501", "PLR0913"]

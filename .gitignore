@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# 개발용 SQLite DB (운영은 PostgreSQL)
+*.db
+*.db-journal
+
+# 환경설정 — .env.example 만 커밋한다
+.env
+.env.local
+!.env.example
+!.env.test
+
+# 업로드한 이미지·동영상. 사용자 데이터라 저장소에 넣지 않는다.
+backend/media/
+
+# Node
+node_modules/
+dist/
+dist-test/
+.vite/
+
+# 에디터/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
