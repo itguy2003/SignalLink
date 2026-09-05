@@ -13,6 +13,19 @@
 export const SPLIT_NONE = 'none'
 
 /**
+ * 상단 정보 표시줄이 차지하는 문서 좌표 높이(InfoBar 와 같은 값).
+ *
+ * 표시줄이 켜져 있으면 그 띠는 **배치 영역이 아니다**. 분할 영역과 분할선도
+ * 이 선 아래에서 계산해야 한다 — 전체 높이로 나누면 첫 행이 표시줄에 깔린다.
+ */
+export const INFO_BAR_HEIGHT = 72
+
+/** 배치·분할이 시작되는 y. 표시줄이 꺼져 있으면 0. */
+export function reservedTop(layout) {
+  return layout?.info_bar ? INFO_BAR_HEIGHT : 0
+}
+
+/**
  * 분할 프리셋.
  *
  * 가로형은 넓으니 좌우로, 세로형은 기니 상하로 나누는 것이 자연스럽다.
@@ -114,9 +127,13 @@ export function computeRegions(layout, key, gap = DEFAULT_GAP, weights = null) {
   const preset = getPreset(key)
   const width = layout?.width ?? 1920
   const height = layout?.height ?? 1080
+  // 표시줄이 켜져 있으면 그 밑부터가 배치 공간이다.
+  // (안쪽 루프의 top 은 간격 깎기용이라 이름을 달리한다.)
+  const reserved = reservedTop(layout)
+  const usable = height - reserved
 
   if (!preset || preset.key === SPLIT_NONE) {
-    return [{ index: 0, x: 0, y: 0, w: width, h: height }]
+    return [{ index: 0, x: 0, y: reserved, w: width, h: usable }]
   }
 
   const { cols, rows } = resolveWeights(key, weights ?? {})
@@ -139,8 +156,8 @@ export function computeRegions(layout, key, gap = DEFAULT_GAP, weights = null) {
 
       const x0 = Math.round(colEdges[col] * width)
       const x1 = Math.round(colEdges[col + 1] * width)
-      const y0 = Math.round(rowEdges[row] * height)
-      const y1 = Math.round(rowEdges[row + 1] * height)
+      const y0 = reserved + Math.round(rowEdges[row] * usable)
+      const y1 = reserved + Math.round(rowEdges[row + 1] * usable)
 
       regions.push({
         index: row * preset.cols + col,
@@ -166,6 +183,8 @@ export function computeDividers(layout, key, weights = null) {
 
   const width = layout?.width ?? 1920
   const height = layout?.height ?? 1080
+  const top = reservedTop(layout)
+  const usable = height - top
   const { cols, rows } = resolveWeights(key, weights ?? {})
   const dividers = []
 
@@ -178,7 +197,7 @@ export function computeDividers(layout, key, weights = null) {
   accumulated = 0
   for (let i = 0; i < rows.length - 1; i += 1) {
     accumulated += rows[i]
-    dividers.push({ axis: 'y', index: i, position: Math.round(accumulated * height) })
+    dividers.push({ axis: 'y', index: i, position: top + Math.round(accumulated * usable) })
   }
   return dividers
 }

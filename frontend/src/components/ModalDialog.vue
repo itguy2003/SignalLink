@@ -5,6 +5,12 @@ import { useI18n } from 'vue-i18n'
 const props = defineProps({
   title: { type: String, required: true },
   width: { type: String, default: '520px' },
+  /**
+   * 고정 높이(예: '80vh'). 주면 내용이 많든 적든 창 크기가 변하지 않고,
+   * 넘치는 내용은 본문 스크롤로 본다. 내용에 따라 창이 커졌다 작아졌다
+   * 하면 단추 위치가 흔들려 누르기 어렵다.
+   */
+  height: { type: String, default: '' },
   busy: { type: Boolean, default: false },
   /** 비우면 '저장'(번역본)을 쓴다. */
   confirmLabel: { type: String, default: '' },
@@ -40,7 +46,12 @@ function onBackdropClick(event) {
 
 <template>
   <div class="backdrop" @mousedown="onBackdropMouseDown" @click="onBackdropClick">
-    <div class="dialog" :style="{ width }" role="dialog" aria-modal="true">
+    <div
+      class="dialog"
+      :style="{ width, height: height || undefined }"
+      role="dialog"
+      aria-modal="true"
+    >
       <header class="dialog-head">
         <h2>{{ title }}</h2>
         <button class="close" :aria-label="t('common.close')" @click="emit('close')">✕</button>
@@ -104,6 +115,8 @@ function onBackdropClick(event) {
 }
 
 .dialog-body {
+  flex: 1;
+  min-height: 0;
   padding: 18px;
   overflow-y: auto;
 }

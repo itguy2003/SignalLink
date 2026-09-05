@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useRoute, useRouter } from 'vue-router'
 
 import { TEST_MODE } from '@/api/client'
 import ActivityBar from '@/components/ActivityBar.vue'
+import ProfileDialog from '@/components/ProfileDialog.vue'
 import { SUPPORTED_LOCALES } from '@/i18n'
 import { COMMUNITY_ROUTES, useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
@@ -26,20 +27,39 @@ const NAV = [
   // 쓰는 재료라, 만드는 순서가 곧 이 순서다.
   { to: '/playlists', key: 'playlists', icon: '🔁' },
   { to: '/contents', key: 'contents', icon: '🎬' },
+  { to: '/boards', key: 'boards', icon: '📰', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
   {
-    to: '/boards',
-    key: 'boards',
-    icon: '📰',
-    roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'COMMUNITY_USER'],
+    // 커뮤니티는 상위기관 단위의 공유 공간 — 기관관리자와 커뮤니티 유저의
+    // 것이다. 어느 커뮤니티를 보는지는 서버가 소속 기관에서 정한다.
+    // 콘텐츠·재생목록은 관리자의 운영 화면이라 adminOnly 로 가른다.
+    key: 'community',
+    icon: '🤝',
+    // 공유 이미지·동영상 메뉴는 게시판으로 합쳤다 — 글에 붙인 파일이
+    // 곧 공유 재료다(콘텐츠·재생목록이 가져다 쓴다).
+    children: [
+      { to: '/community/board', key: 'communityBoard', icon: '💬' },
+      { to: '/community/playlists', key: 'communityPlaylists', icon: '🔁', adminOnly: true },
+      { to: '/community/contents', key: 'communityContents', icon: '🎞', adminOnly: true },
+    ],
   },
 ]
 
 // 역할에 따라 메뉴 자체를 감춘다. 서버도 같은 규칙으로 다시 막는다.
 const menu = computed(() => {
-  // 커뮤니티 유저에게는 게시판 하나만 남긴다. 나머지는 눌러도 서버가 막지만,
-  // 눌리는 것 자체가 '내 것인가' 를 헷갈리게 한다.
-  if (auth.isCommunityUser) return NAV.filter((item) => COMMUNITY_ROUTES.includes(item.key))
+  // 커뮤니티 그룹의 서브 메뉴: 관리자 전용 칸(콘텐츠·재생목록)을 가른다.
+  const communityGroup = (group) => ({
+    ...group,
+    children: group.children.filter((child) => !child.adminOnly || auth.can.manageCommunity),
+  })
+
+  // 커뮤니티 유저에게는 커뮤니티 그룹만 남긴다. 나머지는 눌러도 서버가
+  // 막지만, 눌리는 것 자체가 '내 것인가' 를 헷갈리게 한다.
+  if (auth.isCommunityUser) {
+    return NAV.filter((item) => item.key === 'community').map(communityGroup)
+  }
   return NAV.filter((item) => !item.roles || auth.hasRole(...item.roles))
+    .filter((item) => item.key !== 'community' || auth.can.useCommunity)
+    .map((item) => (item.key === 'community' ? communityGroup(item) : item))
 })
 
 const primaryRole = computed(() => {
@@ -53,6 +73,8 @@ const pageTitle = computed(() => (route.meta.titleKey ? t(route.meta.titleKey) :
 function isActive(item) {
   return route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to))
 }
+
+const profileOpen = ref(false)
 
 function logout() {
   auth.logout()
@@ -72,17 +94,41 @@ function logout() {
       </div>
 
       <nav class="nav">
-        <RouterLink
-          v-for="item in menu"
-          :key="item.to"
-          :to="item.to"
-          class="nav-item"
-          :class="{ active: isActive(item) }"
-          :title="settings.sidebarCollapsed ? t(`nav.${item.key}`) : null"
-        >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span v-if="!settings.sidebarCollapsed" class="nav-label">{{ t(`nav.${item.key}`) }}</span>
-        </RouterLink>
+        <template v-for="item in menu" :key="item.key">
+          <!-- 서브 메뉴가 있는 그룹. 머리글은 누르는 곳이 아니라 이름표다. -->
+          <template v-if="item.children">
+            <div v-if="!settings.sidebarCollapsed" class="nav-group">
+              <span class="nav-icon">{{ item.icon }}</span>
+              <span class="nav-label">{{ t(`nav.${item.key}`) }}</span>
+            </div>
+            <RouterLink
+              v-for="child in item.children"
+              :key="child.to"
+              :to="child.to"
+              class="nav-item"
+              :class="{ sub: !settings.sidebarCollapsed, active: isActive(child) }"
+              :title="settings.sidebarCollapsed ? t(`nav.${child.key}`) : null"
+            >
+              <span class="nav-icon">{{ child.icon }}</span>
+              <span v-if="!settings.sidebarCollapsed" class="nav-label">
+                {{ t(`nav.${child.key}`) }}
+              </span>
+            </RouterLink>
+          </template>
+
+          <RouterLink
+            v-else
+            :to="item.to"
+            class="nav-item"
+            :class="{ active: isActive(item) }"
+            :title="settings.sidebarCollapsed ? t(`nav.${item.key}`) : null"
+          >
+            <span class="nav-icon">{{ item.icon }}</span>
+            <span v-if="!settings.sidebarCollapsed" class="nav-label">
+              {{ t(`nav.${item.key}`) }}
+            </span>
+          </RouterLink>
+        </template>
       </nav>
 
       <div class="sidebar-foot">
@@ -151,7 +197,11 @@ function logout() {
           <div class="who-meta">{{ auth.user.org_name }} · {{ primaryRole }}</div>
         </div>
 
+        <!-- 자기 정보는 자기가 고친다 — 이름·연락처·이메일과 비밀번호. -->
+        <button class="btn btn-sm" @click="profileOpen = true">{{ t('profile.open') }}</button>
         <button class="btn btn-sm" @click="logout">{{ t('layout.logout') }}</button>
+
+        <ProfileDialog v-if="profileOpen" @close="profileOpen = false" />
       </header>
 
       <main class="content">
@@ -227,6 +277,24 @@ function logout() {
   flex-direction: column;
   padding: 12px 8px;
   gap: 2px;
+}
+
+/* 그룹 머리글. 누르는 곳이 아니라 이름표라 흐리게 둔다. */
+.nav-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 6px 14px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* 서브 메뉴는 그룹 아래로 들여 세운다. 접힌 상태에서는 들일 곳이 없다. */
+.nav-item.sub {
+  padding-left: 26px;
 }
 
 .nav-item {

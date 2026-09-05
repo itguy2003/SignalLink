@@ -19,6 +19,12 @@ const props = defineProps({
   widgets: { type: Array, default: () => [] },
   /** 지금 놓을 자리로 지정된 분할 영역(있으면 안내에 쓴다). */
   targetRegion: { type: Number, default: null },
+  /**
+   * 기본 요소만 보일지(커뮤니티 콘텐츠 편집기). 위젯과 재생목록은 기관
+   * 데이터를 끌어오는 통로라 커뮤니티 문서에 넣지 못한다 — 서버도 저장에서
+   * 막는다.
+   */
+  basicOnly: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['add'])
@@ -85,7 +91,11 @@ function onPlaylistDragStart(event) {
       </div>
     </div>
 
-    <div v-for="(specs, category) in widgetGroups" :key="category" class="rail-group">
+    <div
+      v-for="(specs, category) in basicOnly ? {} : widgetGroups"
+      :key="category"
+      class="rail-group"
+    >
       <div class="rail-label">{{ t(`enums.widgetCategory.${category}`) }}</div>
       <div class="rail-btns">
         <button
@@ -103,7 +113,7 @@ function onPlaylistDragStart(event) {
       </div>
     </div>
 
-    <div class="rail-group">
+    <div v-if="!basicOnly" class="rail-group">
       <div class="rail-label">{{ t('widgetPlaylist.element') }}</div>
       <div class="rail-btns">
         <!-- 누르면 고르기 레이어가 열린다. 끌어다 놓으면 놓은 자리에 만든다. -->

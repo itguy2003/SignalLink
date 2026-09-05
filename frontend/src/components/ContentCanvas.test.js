@@ -2353,3 +2353,177 @@ describe('속성 패널이 잘리지 않는다', () => {
     expect(wrapper.findAll('.section-body').length).toBe(3)
   })
 })
+
+describe('상단 정보 표시줄', () => {
+  // 문서 설정(layout.info_bar)이다 — 편집기 장식이 아니라 표출 화면의 일부라,
+  // 편집·미리보기·장치가 같은 줄을 그린다.
+
+  const toggle = (wrapper) => wrapper.find('.info-toggle input')
+
+  it('기본은 꺼져 있다', async () => {
+    const wrapper = mountCanvas(makeDocument())
+    await flushPromises()
+
+    expect(toggle(wrapper).element.checked).toBe(false)
+    expect(wrapper.findComponent({ name: 'InfoBar' }).exists()).toBe(false)
+  })
+
+  it('켜면 문서에 적히고 캔버스 위에 줄이 선다', async () => {
+    const document = makeDocument()
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await toggle(wrapper).setValue(true)
+
+    expect(document.layout.info_bar).toBe(true)
+    expect(wrapper.findComponent({ name: 'InfoBar' }).exists()).toBe(true)
+  })
+
+  it('끄면 키 자체를 지운다', async () => {
+    // 안 쓰는 값이 문서에 남으면 나중에 읽는 사람이 의미 있는 설정이라 믿는다.
+    const document = makeDocument()
+    document.layout.info_bar = true
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await toggle(wrapper).setValue(false)
+
+    expect('info_bar' in document.layout).toBe(false)
+  })
+
+  it('미리보기에서도 그려진다', async () => {
+    // 커뮤니티 위젯·스케줄 미리보기가 이 경로로 문서를 그린다 — 장치와 같은 모습.
+    const document = makeDocument()
+    document.layout.info_bar = true
+    const wrapper = mountCanvas(document, { readonly: true })
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'InfoBar' }).exists()).toBe(true)
+  })
+
+  it('기관을 표시줄에 넘긴다', async () => {
+    // 날씨는 기관 좌표 기준이다.
+    const document = makeDocument()
+    document.layout.info_bar = true
+    const wrapper = mountCanvas(document, { orgId: 3 })
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'InfoBar' }).props('orgId')).toBe(3)
+  })
+})
+
+describe('정보 표시줄 자리는 배치 영역이 아니다', () => {
+  // 요소를 표시줄 밑에 깔아 두면 가려 보이지 않는 채 저장된다.
+
+  function barDocument() {
+    const document = makeDocument()
+    document.layout.info_bar = true
+    return document
+  }
+
+  it('켜는 순간 그 자리에 있던 요소를 아래로 내린다', async () => {
+    const document = makeDocument()
+    document.elements.push({
+      id: 'e1',
+      type: 'text',
+      rect: { x: 0, y: 10, w: 400, h: 100, z: 1 },
+      options: { text: '위에 깔림' },
+    })
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await wrapper.find('.info-toggle input').setValue(true)
+
+    expect(document.elements[0].rect.y).toBe(72)
+  })
+
+  it('새 요소는 표시줄 아래에서 시작한다', async () => {
+    const document = barDocument()
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    // 위쪽(캔버스 y=30 근처)에 끌어다 놓아도 선 아래로 밀린다.
+    await wrapper.find('.canvas').trigger('drop', {
+      dataTransfer: {
+        types: ['application/x-signallink-element'],
+        getData: () => JSON.stringify({ type: 'text' }),
+        dropEffect: '',
+      },
+      preventDefault: () => {},
+      clientX: 240,
+      clientY: 10,
+    })
+    await flushPromises()
+
+    expect(document.elements[0].rect.y).toBeGreaterThanOrEqual(72)
+  })
+
+  it('켜면 분할 영역이 표시줄 밑으로 다시 계산되고 묶인 요소가 따라간다', async () => {
+    // 분할된 문서에서 표시줄을 켰을 때 첫 행 요소가 그대로면 표시줄에 깔린다.
+    const document = makeDocument({
+      layout: { split: { key: 'grid4', gap: 0, cols: null, rows: null } },
+      elements: [
+        {
+          id: 'e1',
+          type: 'text',
+          region: 0,
+          rect: { x: 0, y: 0, w: 960, h: 540, z: 1 },
+          options: { text: '첫 칸' },
+        },
+      ],
+    })
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await wrapper.find('.info-toggle input').setValue(true)
+
+    // 첫 행은 y=72 에서 시작하고 높이는 (1080-72)/2 로 줄어든다.
+    expect(document.elements[0].rect).toMatchObject({ y: 72, h: 504 })
+    expect(document.elements[0].region).toBe(0)
+  })
+
+  it('끄면 묶인 요소가 전체 높이 영역으로 되돌아간다', async () => {
+    const document = makeDocument({
+      layout: {
+        info_bar: true,
+        split: { key: 'grid4', gap: 0, cols: null, rows: null },
+      },
+      elements: [
+        {
+          id: 'e1',
+          type: 'text',
+          region: 0,
+          rect: { x: 0, y: 72, w: 960, h: 504, z: 1 },
+          options: { text: '첫 칸' },
+        },
+      ],
+    })
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await wrapper.find('.info-toggle input').setValue(false)
+
+    expect(document.elements[0].rect).toMatchObject({ y: 0, h: 540 })
+  })
+
+  it('꺼져 있으면 예전대로 위 밖까지 허용한다', async () => {
+    // 요소를 일부러 캔버스 위 밖으로 걸치는 연출은 원래 허용된다.
+    const document = makeDocument()
+    const wrapper = mountCanvas(document)
+    await flushPromises()
+
+    await wrapper.find('.canvas').trigger('drop', {
+      dataTransfer: {
+        types: ['application/x-signallink-element'],
+        getData: () => JSON.stringify({ type: 'text' }),
+        dropEffect: '',
+      },
+      preventDefault: () => {},
+      clientX: 240,
+      clientY: 10,
+    })
+    await flushPromises()
+
+    expect(document.elements[0].rect.y).toBeLessThan(0)
+  })
+})

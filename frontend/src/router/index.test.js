@@ -37,12 +37,20 @@ describe('커뮤니티 유저의 울타리', () => {
   // 메뉴를 숨기는 것만으로는 주소창에 직접 치고 들어오는 것을 못 막는다.
   // 서버도 같은 방식으로 경로를 가른다(api/deps.py).
 
-  it('게시판 경로는 커뮤니티 유저에게 열려 있다', () => {
-    expect(router.resolve('/boards').meta.roles).toContain('COMMUNITY_USER')
+  it('게시판 화면이 있고, 옛 이미지·동영상 화면은 없다', () => {
+    // 공유 이미지·동영상 메뉴는 게시판으로 합쳤다 — 첨부가 곧 재료다.
+    expect(nameOf('/community/board')).toBe('community-board')
+    expect(nameOf('/community/images')).not.toBe('community-images')
+    expect(nameOf('/community/videos')).not.toBe('community-videos')
   })
 
-  it('관리 화면은 열려 있지 않다', () => {
-    for (const path of ['/organizations', '/users']) {
+  it('커뮤니티에는 역할 제한이 없다', () => {
+    // 누구나 제 커뮤니티를 본다. 올릴 수 있는지는 서버가 답한다.
+    expect(router.resolve('/community/board').meta.roles).toBeUndefined()
+  })
+
+  it('관리 화면은 관리자의 것이다', () => {
+    for (const path of ['/organizations', '/users', '/boards']) {
       expect(router.resolve(path).meta.roles, path).not.toContain('COMMUNITY_USER')
     }
   })

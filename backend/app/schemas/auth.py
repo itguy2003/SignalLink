@@ -42,10 +42,20 @@ class MeResponse(BaseModel):
     id: int
     user_id: str
     name: str
+    phone: str | None = None
+    email: str | None = None
     org_id: int
     org_name: str | None = None
     status: str
     roles: list[str]
+
+
+class ProfileUpdateRequest(BaseModel):
+    """내 정보 변경. 비밀번호는 따로 다룬다(현재 비밀번호 확인이 필요해서)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    phone: str | None = Field(default=None, max_length=30)
+    email: EmailStr | None = None
 
 
 class PasswordChangeRequest(BaseModel):

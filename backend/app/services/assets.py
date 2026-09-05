@@ -24,9 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.asset import Asset, BoardPostAsset, ContentAsset, PlaylistAsset
+from app.models.asset import Asset, ContentAsset, PlaylistAsset
+from app.models.community import CommunityPostAsset
+from app.models.community_content import CommunityContent, CommunityContentAsset
 from app.models.content import Content
 from app.models.playlist import Playlist
+from app.services import thumbnails
 
 #: 편집기가 <img> / <video> 로 바로 그릴 수 있는 형식만 받는다. 목록에 없는
 #: 형식은 저장은 되어도 장치에서 안 나오므로, 받는 자리에서 막는 편이 낫다.
@@ -78,6 +81,46 @@ def _relative_path(kind: str, extension: str) -> str:
     return f"{kind}/{today}/{secrets.token_hex(16)}{extension}"
 
 
+class UploadRejected(Exception):
+    """받을 수 없는 업로드. 메시지를 그대로 사용자에게 보여 준다."""
+
+
+#: 한 번에 읽는 조각. 너무 작으면 왕복이 잦고, 너무 크면 메모리를 먹는다.
+_CHUNK_BYTES = 4 * 1024 * 1024
+
+
+async def store_stream(file, kind: str, content_type: str) -> tuple[str, int]:  # noqa: ANN001
+    """업로드 파일을 조각으로 저장한다. (상대 경로, 크기)를 돌려준다.
+
+    통째로 읽지 않는 이유는 동영상 상한이 10GB 이기 때문이다 — 한 번의
+    업로드가 그만큼 메모리를 차지하면 서버가 먼저 쓰러진다. 조각으로 받아
+    쓰고, 상한을 넘는 순간 쓰던 파일을 지우고 끊는다 — 끝까지 받고 나서
+    거절하면 회선과 디스크를 10GB 어치 쓰고 버리는 셈이다.
+    """
+    limit = max_bytes(kind)
+    relative = _relative_path(kind, ALLOWED_TYPES[content_type])
+    path = media_root() / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    size = 0
+    try:
+        with path.open("wb") as out:
+            while chunk := await file.read(_CHUNK_BYTES):
+                size += len(chunk)
+                if size > limit:
+                    raise UploadRejected(f"파일은 {limit // (1024 * 1024)}MB 이하여야 합니다.")
+                out.write(chunk)
+    except BaseException:
+        # 반쯤 쓴 파일을 남기면 디스크에 유령이 쌓인다.
+        path.unlink(missing_ok=True)
+        raise
+
+    if size == 0:
+        path.unlink(missing_ok=True)
+        raise UploadRejected("빈 파일입니다.")
+    return relative, size
+
+
 def store(data: bytes, kind: str, content_type: str) -> str:
     """파일을 저장하고 MEDIA_ROOT 기준 상대 경로를 돌려준다."""
     relative = _relative_path(kind, ALLOWED_TYPES[content_type])
@@ -98,6 +141,25 @@ def remove_file(asset: Asset) -> None:
     영영 남는다 — 실제로 곤란한 쪽은 그쪽이다.
     """
     absolute_path(asset).unlink(missing_ok=True)
+    if asset.thumb_path:
+        (media_root() / asset.thumb_path).unlink(missing_ok=True)
+
+
+def attach_thumbnail(asset: Asset) -> None:
+    """저장된 원본으로 썸네일을 만들어 자산에 적는다. 실패해도 조용하다.
+
+    업로드 자리마다 부른다 — 목록은 원본 대신 이것을 그린다.
+    """
+    asset.thumb_path = thumbnails.generate(
+        media_root(), asset.storage_path, asset.kind, asset.content_type
+    )
+
+
+def thumb_url(asset: Asset) -> str | None:
+    """목록이 그릴 썸네일 주소. 없으면 None — 화면이 원본으로 물러난다."""
+    if not asset.thumb_path:
+        return None
+    return f"{settings.API_V1_PREFIX}/assets/{asset.id}/{asset.token}/thumb"
 
 
 def public_url(asset: Asset) -> str:
@@ -221,11 +283,29 @@ def sync_playlist_links(db: Session, playlist: Playlist) -> None:
         playlist.asset_links.remove(current[asset_id])
 
 
+def sync_community_links(db: Session, content: CommunityContent) -> None:
+    """커뮤니티 콘텐츠가 쓰는 자산 색인을 문서와 맞춘다. 커밋은 호출자가 한다.
+
+    ``sync_links`` 의 커뮤니티판 — 같은 자리에서 같은 방식으로 부른다.
+    """
+    wanted = referenced_ids(content.document)
+    if wanted:
+        existing = set(db.execute(select(Asset.id).where(Asset.id.in_(wanted))).scalars().all())
+        wanted &= existing
+
+    current = {link.asset_id: link for link in content.asset_links}
+    for asset_id in wanted - current.keys():
+        content.asset_links.append(CommunityContentAsset(asset_id=asset_id))
+    for asset_id in current.keys() - wanted:
+        content.asset_links.remove(current[asset_id])
+
+
 def usage_count(db: Session, asset_id: int) -> int:
     """이 자산을 쓰는 곳의 수. 삭제해도 되는지 판단하는 근거다.
 
-    콘텐츠·재생목록·게시글을 함께 센다. 어느 하나를 빼면 그것이 쓰는 파일이
-    '아무도 안 쓰는 파일' 로 보여, 지운 뒤에야 화면이 빈 것을 알게 된다.
+    콘텐츠·재생목록·커뮤니티(공유 자료와 글의 첨부)를 함께 센다. 어느 하나를
+    빼면 그것이 쓰는 파일이 '아무도 안 쓰는 파일' 로 보여, 지운 뒤에야 화면이
+    빈 것을 알게 된다.
     """
     contents = db.execute(
         select(ContentAsset.content_id).where(ContentAsset.asset_id == asset_id)
@@ -234,6 +314,14 @@ def usage_count(db: Session, asset_id: int) -> int:
         select(PlaylistAsset.playlist_id).where(PlaylistAsset.asset_id == asset_id)
     ).scalars()
     posts = db.execute(
-        select(BoardPostAsset.post_id).where(BoardPostAsset.asset_id == asset_id)
+        select(CommunityPostAsset.post_id).where(CommunityPostAsset.asset_id == asset_id)
     ).scalars()
-    return len(set(contents)) + len(set(playlists)) + len(set(posts))
+    community_docs = db.execute(
+        select(CommunityContentAsset.content_id).where(CommunityContentAsset.asset_id == asset_id)
+    ).scalars()
+    return (
+        len(set(contents))
+        + len(set(playlists))
+        + len(set(posts))
+        + len(set(community_docs))
+    )

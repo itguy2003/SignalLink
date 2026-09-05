@@ -275,6 +275,22 @@ ALBUM = register(
     )
 )
 
+COMMUNITY = register(
+    WidgetSpec(
+        key="community",
+        name="커뮤니티",
+        category="콘텐츠형",
+        description="커뮤니티 콘텐츠를 재생목록처럼 순환 표출",
+        data_driven=True,
+        refresh_sec=600,
+        default_size={"w": 800, "h": 600},
+        # 옵션이 없다. 무엇을 틀지는 서버가 고른다 — 콘텐츠의 사용기간과
+        # 사용대상(장치의 학교급)에 맞는 것 중 가장 최근 것. 화면마다 고르게
+        # 하면 기간이 지나거나 대상이 어긋난 채 방치된다.
+        options=[],
+    )
+)
+
 AI_IMAGE = register(
     WidgetSpec(
         key="ai_image",
@@ -418,11 +434,82 @@ def _painting_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
     return {"title": "별이 빛나는 밤", "artist": "빈센트 반 고흐", "src": None}
 
 
+@data_provider("community")
+def _community_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
+    """커뮤니티 위젯이 틀 콘텐츠.
+
+    장치(플레이어)와 편집기 미리보기가 함께 부른다. 무엇을 틀지는 서버가
+    고른다 — 화면마다 고르게 하면 기간이 지나거나 대상이 어긋난 채 방치된다.
+
+    울타리    요청한 기관의 커뮤니티 것만 나간다.
+    사용기간  콘텐츠가 들고 있다. 기간 밖이면 후보에서 빠진다.
+    사용대상  장치가 놓인 기관의 학교급과 맞아야 한다 — 초등학교 장치에는
+              '초' 와 '전체' 만 나간다. 학교급이 없는 곳(교육청)은 '전체' 만.
+
+    맞는 것 중 **가장 최근 것 하나**를 튼다. 최신 것이 기간 밖이면 그 아래에서
+    찾는다 — 빈 화면보다 낫다.
+    """
+    from sqlalchemy import select as _select
+
+    from app.models.community_content import CommunityContent
+    from app.models.organization import Organization
+    from app.services import permissions
+
+    community_org = permissions.community_org_of(db, org_id)
+    if community_org is None:
+        return None
+
+    org = db.get(Organization, org_id)
+    level = org.school_level if org else None
+    audiences = {"전체"} | ({str(level)} if level else set())
+
+    today = date.today().isoformat()
+
+    def _fits(row: CommunityContent) -> bool:
+        if row.audience not in audiences:
+            return False
+        if row.start_date and today < row.start_date:
+            return False
+        return not (row.end_date and today > row.end_date)
+
+    rows = (
+        db.execute(
+            _select(CommunityContent)
+            .where(CommunityContent.org_id == community_org)
+            .order_by(CommunityContent.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return None
+
+    content = next((row for row in rows if _fits(row)), None)
+    if content is None:
+        # 콘텐츠는 있는데 지금 이 장치에 틀 것이 없다(기간 밖이거나 대상 밖).
+        return {"active": False, "title": None, "version": 0, "document": None}
+
+    # 문서는 CMS 콘텐츠와 같은 계약이라 플레이어가 그대로 그린다. 자산 주소는
+    # 편집기가 저장할 때부터 열쇠 붙은 공개 주소다(``services/assets.public_url``).
+    return {
+        "active": True,
+        "title": content.title,
+        "version": content.version,
+        "document": content.document,
+    }
+
+
 @data_provider("weather")
 def _weather_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
-    """기관 좌표 기준 날씨.
+    """기관 좌표 기준 날씨와 미세먼지.
 
-    TODO: 기상청 단기예보 API 연동. 현재는 좌표만 확인해 자리표시자를 돌려준다.
+    날씨 위젯과 콘텐츠 상단 정보 표시줄(``layout.info_bar``)이 함께 쓴다.
+    연동되면 ``available: True`` 와 함께 다음 모양으로 돌려줄 것:
+    ``{temp, condition, icon, high, low, dust, pm10}`` — ``dust`` 는 미세먼지
+    등급 문구, ``pm10`` 은 ㎍/㎥ 수치다.
+
+    TODO: 기상청 단기예보 + 에어코리아 대기질 API 연동. 현재는 좌표만 확인해
+    자리표시자를 돌려준다(클라이언트는 샘플로 그린다).
     """
     from app.models.organization import Organization
 

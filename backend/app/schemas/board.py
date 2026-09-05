@@ -5,7 +5,6 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import BoardKind
-from app.schemas.asset import AssetOut
 
 
 class OrgBoardBase(BaseModel):
@@ -47,8 +46,6 @@ class BoardPostOut(BaseModel):
     day: int | None
     term: int | None
     content: str | None
-    #: 붙인 이미지·동영상. 올린 차례대로.
-    attachments: list[AssetOut] = Field(default_factory=list)
 
 
 class BoardPostCreate(BaseModel):

@@ -10,7 +10,7 @@
     DEVICE_MANAGER     자신에게 위임된 장치만
     HOMEROOM_TEACHER   자기 기관 장치 조회 + 위임받은 장치 관리
     MEMBER             기본 역할. 본인 정보만.
-    COMMUNITY_USER     게시판만. 관리 화면에는 들어오지 못하고, 부설기관에만 둔다.
+    COMMUNITY_USER     커뮤니티(공유 게시판·이미지·동영상)만. 관리 화면에는 들어오지 못한다.
 """
 
 from __future__ import annotations
@@ -46,20 +46,63 @@ def is_community_user(user: User) -> bool:
     )
 
 
-def can_read_board(db: Session, user: User, org_id: int) -> bool:
-    """게시판을 볼 수 있는가. 소속 기관(과 하위 기관)의 것만."""
-    return can_view_org(db, user, org_id)
+def community_org_of(db: Session, org_id: int) -> int | None:
+    """이 기관이 속한 커뮤니티(상위기관)의 id. 없으면 None.
 
-
-def can_post_to_board(db: Session, user: User, org_id: int) -> bool:
-    """게시판에 글을 올릴 수 있는가.
-
-    관리자는 어느 기관이든 자기 범위 안이면 되고, 커뮤니티 유저는 **자기
-    기관** 게시판에만 올린다 — 게시판이 그 사람에게 열려 있는 유일한 창구다.
+    커뮤니티는 상위기관(org_type=기관)에만 있다 — 학교에는 없다. 트리를 따라
+    올라가 **처음 만나는 상위기관**이 그 자리다. 사람도 장치도 같은 규칙으로
+    제 커뮤니티를 찾는다.
     """
-    if can_manage_org(db, user, org_id):
+    org = db.get(Organization, org_id)
+    seen: set[int] = set()
+    while org is not None and org.id not in seen:
+        seen.add(org.id)
+        if org.org_type == OrgType.ORG:
+            return org.id
+        org = db.get(Organization, org.parent_id) if org.parent_id is not None else None
+    return None
+
+
+def community_org_id(db: Session, user: User) -> int | None:
+    """이 사용자가 보는 커뮤니티(상위기관)의 id. 없으면 None."""
+    return community_org_of(db, user.org_id)
+
+
+def can_use_community(user: User) -> bool:
+    """커뮤니티 공간(게시판·이미지·동영상)에 들어올 수 있는가.
+
+    기관관리자와 커뮤니티 유저의 공간이다(슈퍼관리자는 어디든 들어온다).
+    일반 회원·장치담당·담임은 들어오지 못한다 — 메뉴도 서지 않지만,
+    주소를 쳐도 여기서 막는다.
+    """
+    return (
+        user.has_role(Role.COMMUNITY_USER) or is_super_admin(user) or is_org_admin(user)
+    )
+
+
+def can_manage_community(user: User) -> bool:
+    """커뮤니티 콘텐츠·재생목록을 다룰 수 있는가 — 관리자만.
+
+    커뮤니티 유저는 자료(글·이미지·동영상)를 올리는 사람이고, 그것을 엮어
+    화면에 내보내는 일(콘텐츠·재생목록)은 운영이다.
+    """
+    return is_super_admin(user) or is_org_admin(user)
+
+
+def can_share_in_community(user: User) -> bool:
+    """커뮤니티에 올릴 수 있는가(글·이미지·동영상).
+
+    커뮤니티에 들어올 수 있는 사람은 모두 올릴 수 있다 — 남의 것에는
+    조회만 되고, 제 것에만 수정·삭제가 열린다(``can_remove_shared``).
+    """
+    return can_use_community(user)
+
+
+def can_remove_shared(user: User, uploaded_by: int | None) -> bool:
+    """공유한 것을 지울 수 있는가. 올린 사람 본인과 관리자만."""
+    if is_super_admin(user) or is_org_admin(user):
         return True
-    return is_community_user(user) and org_id == user.org_id
+    return uploaded_by is not None and uploaded_by == user.id
 
 
 def managed_org_ids(db: Session, user: User) -> set[int] | None:
@@ -115,22 +158,6 @@ def can_manage_user(db: Session, actor: User, target: User) -> bool:
     if actor.id == target.id:
         return True
     return can_approve_user(db, actor, target)
-
-
-def role_fits_org(db: Session, role: Role | str, org_id: int) -> bool:
-    """그 역할을 그 기관에 둘 수 있는가.
-
-    커뮤니티 유저는 **부설기관**(도서관·문화센터 등) 소속이다. 학교에 두지
-    않는 이유는 그 사람이 학교 구성원이 아니기 때문이다 — 학교 게시판을
-    바깥 사람에게 열어 주는 것과, 부설기관 게시판을 그 이용자에게 열어 주는
-    것은 다른 일이다.
-
-    다른 역할에는 이런 제약이 없다.
-    """
-    if str(role) != Role.COMMUNITY_USER:
-        return True
-    org = db.get(Organization, org_id)
-    return org is not None and org.org_type == OrgType.AFFILIATE
 
 
 def can_grant_role(actor: User, role: Role | str) -> bool:

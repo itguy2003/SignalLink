@@ -87,8 +87,17 @@ function clampNumber(option, raw) {
     <div v-for="option in spec?.options ?? []" :key="option.key" class="field">
       <label>{{ option.label }}<span v-if="option.required"> *</span></label>
 
+      <!-- 사용기간 같은 날짜 옵션. -->
+      <input
+        v-if="option.type === 'date'"
+        class="input"
+        type="date"
+        :value="element.options[option.key] ?? ''"
+        @change="set(option, $event.target.value || null)"
+      />
+
       <ImageListEditor
-        v-if="option.type === 'image_list'"
+        v-else-if="option.type === 'image_list'"
         :model-value="listValue(option)"
         :org-id="orgId"
         :default-transition="albumTransition"

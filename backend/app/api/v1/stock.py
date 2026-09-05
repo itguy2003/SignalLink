@@ -150,10 +150,12 @@ async def save_stock(payload: StockSaveRequest, actor: CurrentUser, db: DbSessio
         size_bytes=len(data),
         storage_path=stored,
     )
+    asset_service.attach_thumbnail(asset)
     db.add(asset)
     db.commit()
     db.refresh(asset)
 
     out = AssetOut.model_validate(asset)
     out.url = asset_service.public_url(asset)
+    out.thumb_url = asset_service.thumb_url(asset)
     return out

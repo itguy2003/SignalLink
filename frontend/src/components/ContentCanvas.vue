@@ -20,6 +20,7 @@ import AlbumEditorDialog from '@/components/AlbumEditorDialog.vue'
 import MediaPicker from '@/components/MediaPicker.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import WidgetOptions from '@/components/WidgetOptions.vue'
+import InfoBar from '@/components/InfoBar.vue'
 import PlaylistCycle from '@/components/PlaylistCycle.vue'
 import WidgetPreview from '@/components/WidgetPreview.vue'
 import WidgetRail from '@/components/WidgetRail.vue'
@@ -59,6 +60,7 @@ import {
   sendLayerTo,
 } from '@/utils/layers'
 import {
+  INFO_BAR_HEIGHT,
   SPLIT_NONE,
   availableSplits,
   computeDividers,
@@ -69,6 +71,7 @@ import {
   isSplitAllowed,
   readSplit,
   refitElements,
+  reservedTop,
   resizeWeights,
   resolveWeights,
 } from '@/utils/canvasSplit'
@@ -77,6 +80,12 @@ const props = defineProps({
   document: { type: Object, required: true },
   widgets: { type: Array, default: () => [] },
   readonly: { type: Boolean, default: false },
+  /**
+   * 커뮤니티 콘텐츠 편집기인가. 레일은 기본 요소만 서고, 이미지·동영상
+   * 고르기 창이 공유물/라이브러리/링크 구성으로 바뀐다. 위젯·재생목록을
+   * 막는 최종 판정은 서버가 한다(커뮤니티 문서 검증).
+   */
+  communityMode: { type: Boolean, default: false },
   /** 원본 크기보다 크게 볼 수 있는 한도. 작은 콘텐츠도 화면을 채우게 한다. */
   maxScale: { type: Number, default: 2 },
   /** 이 콘텐츠가 속한 기관. 편집기에서 재생목록을 새로 만들 때 쓴다. */
@@ -319,7 +328,10 @@ function onDividerDrag(event) {
       split: { ...split.value, cols: resizeWeights(cols, divider.index, delta), rows },
     }
   } else {
-    const delta = (event.clientY - startY) / scale.value / layout.value.height
+    // 행 비율은 표시줄을 뺀 높이 위에서 논다 — 전체 높이로 나누면
+    // 마우스보다 분할선이 덜 움직인다.
+    const usable = layout.value.height - reservedTop(layout.value)
+    const delta = (event.clientY - startY) / scale.value / usable
     props.document.layout = {
       ...layout.value,
       split: { ...split.value, cols, rows: resizeWeights(rows, divider.index, delta) },
@@ -396,7 +408,8 @@ function addElement(type, widgetKey = null, at = null) {
     widget_key: widgetKey,
     rect: {
       x: Math.round(centerX - size.w / 2),
-      y: Math.round(centerY - size.h / 2),
+      // 표시줄이 켜져 있으면 그 밑에서 시작한다 — 그 띠는 배치 영역이 아니다.
+      y: Math.max(layoutTop.value, Math.round(centerY - size.h / 2)),
       w: size.w,
       h: size.h,
       z: elements.value.length + 1,
@@ -960,7 +973,8 @@ function onDrag(event) {
       'move',
     )
     drag.element.rect.x = next.x
-    drag.element.rect.y = next.y
+    // 표시줄 밑으로는 못 올라간다 — 그 띠는 배치 영역이 아니다.
+    drag.element.rect.y = Math.max(layoutTop.value, next.y)
   } else {
     const next = snapRect(
       {
@@ -986,6 +1000,41 @@ function endDrag() {
   drag = null
   window.removeEventListener('mousemove', onDrag)
   window.removeEventListener('mouseup', endDrag)
+}
+
+/**
+ * 배치가 시작되는 y. 표시줄이 켜져 있으면 그 띠(INFO_BAR_HEIGHT)는 배치
+ * 영역이 아니다 — 요소를 그 밑에 깔아 두면 표시줄에 가려 보이지 않는 채
+ * 저장된다. 꺼져 있으면 제한이 없다 — 요소를 일부러 캔버스 위 밖으로
+ * 걸치는 연출은 원래 허용된다.
+ */
+const layoutTop = computed(() => (layout.value.info_bar ? INFO_BAR_HEIGHT : -Infinity))
+
+/**
+ * 상단 정보 표시줄을 켜고 끈다.
+ *
+ * 끄면 키 자체를 지운다 — 안 쓰는 값이 문서에 남으면 나중에 읽는 사람이
+ * 의미 있는 설정이라고 믿게 된다.
+ */
+function setInfoBar(on) {
+  if (on) {
+    props.document.layout = { ...layout.value, info_bar: true }
+  } else {
+    const next = { ...layout.value }
+    delete next.info_bar
+    props.document.layout = next
+  }
+  // 분할 영역이 표시줄만큼 줄거나 늘었다 — 영역에 묶인 요소를 새 자리에
+  // 다시 맞춘다. 자유 배치 요소는 건드리지 않는다.
+  refitElements(elements.value, regions.value)
+  if (on) {
+    // 표시줄 자리에 깔린 자유 배치 요소는 아래로 내린다. 그대로 두면
+    // 표시줄에 가려 보이지 않는 채 저장된다.
+    for (const element of elements.value) {
+      if (element.rect.y < INFO_BAR_HEIGHT) element.rect.y = INFO_BAR_HEIGHT
+    }
+  }
+  touch()
 }
 
 function setOrientation(portrait) {
@@ -1018,6 +1067,7 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
       v-if="!readonly"
       :widgets="widgets"
       :target-region="targetRegion"
+      :basic-only="communityMode"
       @add="addFromRail"
     />
 
@@ -1035,6 +1085,9 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
           @dragover="onCanvasDragOver"
           @drop="onCanvasDrop"
         >
+          <!-- 상단 정보 표시줄. 문서 설정이라 편집·미리보기·장치가 같은 줄을 그린다. -->
+          <InfoBar v-if="layout.info_bar" :scale="scale" :org-id="orgId" />
+
           <!-- 격자: 테마 색을 쓰고 클릭은 통과시킨다. -->
           <div v-if="gridVisible" class="grid-overlay" :style="gridStyle" />
 
@@ -1076,7 +1129,11 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
               :class="divider.axis === 'x' ? 'vertical' : 'horizontal'"
               :style="
                 divider.axis === 'x'
-                  ? { left: `${divider.position * scale}px`, background: ink.divider }
+                  ? {
+                      left: `${divider.position * scale}px`,
+                      top: `${reservedTop(layout) * scale}px`,
+                      background: ink.divider,
+                    }
                   : { top: `${divider.position * scale}px`, background: ink.divider }
               "
               :title="t('split.dragDivider')"
@@ -1289,6 +1346,19 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
         <h3 class="section-title">{{ t('canvas.sectionCanvas') }}</h3>
 
         <div class="section-body">
+          <div class="palette-group">
+            <h4>{{ t('infoBar.title') }}</h4>
+            <!-- 문서에 저장된다 — 편집기 장식이 아니라 표출 화면의 일부다. -->
+            <label class="check info-toggle">
+              <input
+                type="checkbox"
+                :checked="layout.info_bar === true"
+                @change="setInfoBar($event.target.checked)"
+              />
+              {{ t('infoBar.toggle') }}
+            </label>
+          </div>
+
           <div class="palette-group">
             <h4>{{ t('canvas.orientation') }}</h4>
             <div class="row">
@@ -1916,6 +1986,7 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
       :org-id="orgId"
       :current="mediaMode === 'replace' ? (selected?.src ?? '') : ''"
       :orientation="ofSize(layout.width, layout.height)"
+      :variant="communityMode ? 'community' : 'default'"
       @close="mediaPickerOpen = false; clearPendingDrop()"
       @select="chooseMedia"
     />
@@ -2271,6 +2342,15 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
   width: 80px;
   padding: 3px 6px;
   font-size: 12px;
+}
+
+.info-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 /* ---------------------------------------------------------------- 사이드 패널 */

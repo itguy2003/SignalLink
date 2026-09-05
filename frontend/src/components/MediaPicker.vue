@@ -24,6 +24,8 @@ const props = defineProps({
   orientation: { type: String, default: null },
   /** 여러 장을 한 번에 고를지. 켜면 `select-many` 로 배열을 올린다. */
   multiple: { type: Boolean, default: false },
+  /** 'default' | 'community'. 커뮤니티 편집기의 재료 구성(`MediaSourcePanel`). */
+  variant: { type: String, default: 'default' },
 })
 
 const emit = defineEmits(['close', 'select', 'select-many'])
@@ -46,6 +48,7 @@ const isImage = computed(() => props.kind === 'image')
       :current="current"
       :orientation="orientation"
       :multiple="multiple"
+      :variant="variant"
       @select="emit('select', $event)"
       @select-many="emit('select-many', $event)"
     />

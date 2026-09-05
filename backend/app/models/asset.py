@@ -3,13 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
-    from app.models.board import BoardPost
     from app.models.content import Content
     from app.models.organization import Organization
     from app.models.playlist import Playlist
@@ -53,6 +52,10 @@ class Asset(Base, TimestampMixin):
     #: 모든 행을 고쳐야 한다.
     storage_path: Mapped[str] = mapped_column(String(300), nullable=False)
 
+    #: 목록용 축소 JPEG 의 상대 경로. 없으면 NULL — 화면이 원본으로 그린다.
+    #: (벡터 이미지, ffmpeg 없는 서버의 동영상, 깨진 파일 등은 못 만든다.)
+    thumb_path: Mapped[str | None] = mapped_column(String(300))
+
     @property
     def token(self) -> str:
         """주소에 넣는 열쇠. 저장 파일 이름(무작위 32자)을 그대로 쓴다.
@@ -73,9 +76,6 @@ class Asset(Base, TimestampMixin):
         back_populates="asset", cascade="all, delete-orphan"
     )
     playlist_links: Mapped[list[PlaylistAsset]] = relationship(
-        back_populates="asset", cascade="all, delete-orphan"
-    )
-    post_links: Mapped[list[BoardPostAsset]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
 
@@ -126,30 +126,3 @@ class PlaylistAsset(Base):
     playlist: Mapped[Playlist] = relationship(back_populates="asset_links")
     asset: Mapped[Asset] = relationship(back_populates="playlist_links")
 
-
-class BoardPostAsset(Base):
-    """게시글에 붙인 파일.
-
-    ``ContentAsset`` / ``PlaylistAsset`` 과 같은 모양이다. 자산을 따로 두고
-    이어 붙이는 이유는 파일을 다루는 길이 하나뿐이어야 하기 때문이다 —
-    올리기·용량 제한·형식 검사·내려받기 주소가 모두 ``services/assets`` 한 곳에
-    있고, 게시판은 그것을 가리키기만 한다.
-
-    순서를 들고 있는 이유는 사진 여러 장을 붙였을 때 올린 차례대로 보여
-    주기 위해서다.
-    """
-
-    __tablename__ = "board_post_asset"
-    __table_args__ = (UniqueConstraint("post_id", "asset_id", name="uq_board_post_asset"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    post_id: Mapped[int] = mapped_column(
-        ForeignKey("board_post.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    asset_id: Mapped[int] = mapped_column(
-        ForeignKey("asset.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-    post: Mapped[BoardPost] = relationship(back_populates="attachment_links")
-    asset: Mapped[Asset] = relationship(back_populates="post_links")

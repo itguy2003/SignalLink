@@ -160,16 +160,6 @@ def update_user(
             raise forbid("해당 기관으로 소속을 옮길 권한이 없습니다.")
         if db.get(Organization, data["org_id"]) is None:
             raise bad_request("존재하지 않는 기관입니다.")
-        # 커뮤니티 유저를 학교나 상급기관으로 옮기면 그 사람이 있을 자리가
-        # 없어진다. 역할을 함께 바꾸는 요청이면 그쪽 검사가 뒤에서 다시 본다.
-        next_roles = data.get("roles")
-        keeps_community = Role.COMMUNITY_USER in target.role_names and (
-            next_roles is None or Role.COMMUNITY_USER in {str(r) for r in next_roles}
-        )
-        if keeps_community and not permissions.role_fits_org(
-            db, Role.COMMUNITY_USER, data["org_id"]
-        ):
-            raise bad_request("커뮤니티 유저는 부설기관 소속이어야 합니다.")
         target.org_id = data["org_id"]
 
     if "status" in data and data["status"] is not None:
@@ -183,10 +173,6 @@ def update_user(
         for role in data["roles"]:
             if not permissions.can_grant_role(actor, role):
                 raise forbid(f"{role} 역할을 부여할 권한이 없습니다.")
-            # 커뮤니티 유저는 부설기관 소속이다. 소속을 함께 바꾸는 요청이면
-            # 바뀐 뒤의 기관으로 따진다 — 옮기고 나서야 막히면 두 번 일한다.
-            if not permissions.role_fits_org(db, role, target.org_id):
-                raise bad_request("커뮤니티 유저는 부설기관 소속이어야 합니다.")
         _replace_roles(db, target, [str(r) for r in data["roles"]])
 
     if "password" in data and data["password"]:

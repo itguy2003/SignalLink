@@ -73,6 +73,12 @@ class MockServer {
     this.playlists = seed.playlists
     this.assets = seed.assets ?? []
     this.boards = seed.boards
+    /** 커뮤니티(상위기관 공유 공간). 테스트 모드에서도 흐름을 다 밟을 수 있다. */
+    this.communityPosts = []
+    this.communityMedia = []
+    this.communityMediaPosts = []
+    this.communityContents = []
+    this.communityPlaylists = []
     this.posts = seed.posts
     this.sessions = new Map()
     this.nextId = {
@@ -88,6 +94,11 @@ class MockServer {
       playlist: 100,
       playlistItem: 100,
       asset: 100,
+      communityPost: 100,
+      communityMedia: 100,
+      communityMediaPost: 100,
+      communityContent: 100,
+      communityPlaylist: 100,
     }
   }
 
@@ -342,14 +353,128 @@ class MockServer {
   }
 
   /** 자산 하나의 공개 모양. 주소는 서버가 정한다(편집기가 규칙을 모르게). */
+  /** 소속 기관에서 위로 올라가 처음 만나는 '기관'. 커뮤니티가 걸린 자리다. */
+  communityOrgOf(user) {
+    let org = this.organizations.find((o) => o.id === user.org_id) ?? null
+    const seen = new Set()
+    while (org && !seen.has(org.id)) {
+      seen.add(org.id)
+      if (org.org_type === '기관') return org
+      org = this.organizations.find((o) => o.id === org.parent_id) ?? null
+    }
+    return null
+  }
+
+  /** FormData 에서 파일 메타만 받아 자산을 흉내 낸다(테스트 모드 공통). */
+  mockAssetFromForm(user, body) {
+    const file = body?.get?.('file') ?? null
+    if (!file) throw new ApiError(400, '빈 파일입니다.')
+    const kind = String(file.type || '').startsWith('video/') ? 'video' : 'image'
+    const asset = {
+      id: this.nextId.asset++,
+      org_id: user.org_id,
+      uploaded_by: user.id,
+      kind,
+      filename: file.name || 'upload',
+      content_type: file.type || 'application/octet-stream',
+      size_bytes: file.size || 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      mock_url:
+        typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(file) : '',
+    }
+    this.assets.push(asset)
+    return asset
+  }
+
   publicAsset(asset) {
+    const url = asset.mock_url || `/api/v1/assets/${asset.id}/${asset.token ?? 'mock'}/file`
     return {
       ...clone(asset),
       // 열쇠가 붙은 주소. 실제 서버와 같은 모양이라야 화면 코드가 같게 돈다.
-      url: asset.mock_url || `/api/v1/assets/${asset.id}/${asset.token ?? 'mock'}/file`,
+      url,
+      // 실제 서버는 올릴 때 축소본을 만든다. 목업은 이미지에는 원본을 그대로
+      // 물리고(그릴 수는 있어야 하니), 동영상에는 없음을 줘서 물러나는
+      // 경로(<video preload>)도 굴려 본다.
+      thumb_url: asset.kind === 'image' ? url : null,
       org_name: this.orgName(asset.org_id),
       usage_count: this.assetUsage(asset.id),
     }
+  }
+
+  /** 칸이 전부 이 커뮤니티의 공유물인지 검사하고 저장 모양으로 만든다. */
+  cleanCommunityPlaylistItems(orgId, items) {
+    if (!items || items.length === 0) throw new ApiError(400, '칸을 하나 이상 담아야 합니다.')
+    return items.map((item) => {
+      const row = this.communityMedia.find(
+        (m) => m.org_id === orgId && m.asset.id === item.asset_id && m.asset.kind === item.kind,
+      )
+      if (!row) throw new ApiError(400, '커뮤니티에 공유된 이미지·동영상만 담을 수 있습니다.')
+      return {
+        kind: item.kind,
+        asset_id: item.asset_id,
+        duration_sec: item.duration_sec,
+        ...(item.transition && item.transition !== 'none'
+          ? { transition: item.transition, transition_ms: item.transition_ms ?? 600 }
+          : {}),
+      }
+    })
+  }
+
+  /** 게시글에 파일들을 자산으로 담는다. 갈래가 다르면 거절 — 실제 서버와 같다. */
+  mockAddMediaFiles(user, post, files) {
+    for (const file of files) {
+      const kind = String(file.type || '').startsWith('video/') ? 'video' : 'image'
+      if (kind !== post.kind) {
+        throw new ApiError(400, '이 게시글에는 같은 갈래의 파일만 담을 수 있습니다.')
+      }
+    }
+    for (const file of files) {
+      const form = new FormData()
+      form.append('file', file)
+      const asset = this.mockAssetFromForm(user, form)
+      const row = {
+        id: this.nextId.communityMedia++,
+        org_id: post.org_id,
+        post_id: post.id,
+        asset_id: asset.id,
+        asset: this.publicAsset(asset),
+      }
+      this.communityMedia.push(row)
+      post.item_ids.push(row.id)
+    }
+  }
+
+  /** 게시글 응답 — 담긴 파일에 주소를 붙여 함께 준다. */
+  publicMediaPost(post) {
+    const items = post.item_ids
+      .map((id) => this.communityMedia.find((m) => m.id === id))
+      .filter(Boolean)
+      .map((m) => ({ id: m.id, asset: this.publicAsset(this.assets.find((a) => a.id === m.asset.id) ?? m.asset) }))
+    return {
+      id: post.id,
+      kind: post.kind,
+      title: post.title,
+      description: post.description ?? '',
+      author_id: post.author_id,
+      author_name: post.author_name,
+      created_at: post.created_at,
+      items,
+      item_count: items.length,
+      can_remove: true,
+    }
+  }
+
+  /** 저장된 칸에 화면이 그릴 이름·주소를 붙인다. 공유가 거둬진 것은 건너뛴다. */
+  publicCommunityPlaylist(playlist) {
+    const items = (playlist.items ?? []).flatMap((item) => {
+      const row = this.communityMedia.find(
+        (m) => m.org_id === playlist.org_id && m.asset.id === item.asset_id,
+      )
+      if (!row) return []
+      return [{ ...item, title: row.title || row.asset.filename, url: row.asset.url }]
+    })
+    return { ...playlist, items }
   }
 
   /** 이 파일을 쓰는 콘텐츠 수. 문서의 src 를 훑는다(서버는 색인을 쓴다). */
@@ -1483,62 +1608,253 @@ class MockServer {
       'GET /boards/:id/posts': ({ token, ids, params }) => {
         this.requireUser(token)
         const items = this.posts.filter((p) => p.board_id === ids[0])
-        // 첨부 목록은 늘 있어야 한다. 없으면 화면이 undefined 를 훑는다.
-        return this.paginate(items.map((p) => ({ attachments: [], ...p })), params)
+        return this.paginate(items, params)
       },
 
-      'POST /boards/:id/posts': ({ token, ids, body }) => {
+      // ------------------------------------------------------------ 커뮤니티
+      // 어느 커뮤니티인지는 서버가 정한다: 소속 기관에서 위로 올라가 처음
+      // 만나는 '기관'. 목 서버도 같은 규칙을 쓴다.
+      'PUT /auth/me': ({ token, body }) => {
         const user = this.requireUser(token)
-        const post = {
-          id: this.nextId.post++,
-          board_id: ids[0],
-          title: body.title,
-          author: body.author ?? user.name,
-          posted_on: body.posted_on ?? null,
-          year: null,
-          month: null,
-          day: null,
-          term: null,
-          content: body.content ?? null,
-          attachments: [],
+        if (body.name != null) user.name = body.name
+        if (body.phone !== undefined) user.phone = body.phone
+        if (body.email !== undefined) user.email = body.email
+        return this.publicUser(user)
+      },
+
+      'POST /auth/change-password': ({ token, body }) => {
+        const user = this.requireUser(token)
+        if (body.current_password !== user.password) {
+          throw new ApiError(400, '현재 비밀번호가 올바르지 않습니다.')
         }
-        this.posts.push(post)
+        user.password = body.new_password
+        return { detail: '비밀번호가 변경되었습니다.' }
+      },
+
+      'GET /community/context': ({ token }) => {
+        const user = this.requireUser(token)
+        const org = this.communityOrgOf(user)
+        if (!org) throw new ApiError(404, '커뮤니티을(를) 찾을 수 없습니다.')
+        const canShare =
+          user.roles.includes('COMMUNITY_USER') ||
+          user.roles.includes('SUPER_ADMIN') ||
+          user.roles.includes('ORG_ADMIN')
+        return { org_id: org.id, org_name: org.name, can_share: canShare }
+      },
+
+      'GET /community/posts': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const org = this.communityOrgOf(user)
+        const admin =
+          user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN')
+        const items = this.communityPosts
+          .filter((p) => p.org_id === org?.id)
+          .slice()
+          .reverse()
+          .map((p) => ({ ...p, publish_status: p.publish_status ?? '대기중', can_publish: admin }))
+        return this.paginate(items, params)
+      },
+
+      'PUT /community/posts/:id/status': ({ token, ids, body }) => {
+        const user = this.requireUser(token)
+        const admin =
+          user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN')
+        if (!admin) throw new ApiError(403, '게시 결과는 커뮤니티 소유 기관의 관리자만 설정할 수 있습니다.')
+        const post = this.communityPosts.find((p) => p.id === ids[0])
+        if (!post) throw new ApiError(404, '게시글을(를) 찾을 수 없습니다.')
+        if (!['대기중', '게시', '게시보류'].includes(body.status)) {
+          throw new ApiError(400, '게시 결과는 대기중·게시·게시보류 중 하나여야 합니다.')
+        }
+        post.publish_status = body.status
+        return { ...post, can_publish: true }
+      },
+
+      'POST /community/posts': ({ token, body }) => {
+        const user = this.requireUser(token)
+        const org = this.communityOrgOf(user)
+        const post = {
+          id: this.nextId.communityPost++,
+          org_id: org.id,
+          author_id: user.id,
+          author_name: user.name,
+          title: body.title,
+          content: body.content ?? null,
+          created_at: new Date().toISOString(),
+          attachments: [],
+          // 글은 늘 대기중으로 시작한다. 게시 여부는 관리자가 정한다.
+          publish_status: '대기중',
+          can_remove: true,
+          can_publish:
+            user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN'),
+        }
+        this.communityPosts.push(post)
         return post
       },
 
-      // 테스트 모드에는 네트워크가 없다. 파일 메타만 받아 흉내 낸다.
-      'POST /boards/:id/posts/:postId/attachments': ({ token, ids, body }) => {
+      'POST /community/posts/:id/attachments': ({ token, ids, body }) => {
         const user = this.requireUser(token)
-        const post = this.posts.find((p) => p.id === ids[1])
+        const post = this.communityPosts.find((p) => p.id === ids[0])
         if (!post) throw new ApiError(404, '게시글을(를) 찾을 수 없습니다.')
-
-        const file = body?.get?.('file') ?? null
-        if (!file) throw new ApiError(400, '빈 파일입니다.')
-        const kind = String(file.type || '').startsWith('video/') ? 'video' : 'image'
-        const asset = {
-          id: this.nextId.asset++,
-          org_id: user.org_id,
-          uploaded_by: user.id,
-          kind,
-          filename: file.name || 'upload',
-          content_type: file.type || 'application/octet-stream',
-          size_bytes: file.size || 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          mock_url:
-            typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(file) : '',
-        }
-        this.assets.push(asset)
-        ;(post.attachments ??= []).push(this.publicAsset(asset))
+        const asset = this.mockAssetFromForm(user, body)
+        post.attachments.push(this.publicAsset(asset))
         return this.publicAsset(asset)
       },
 
-      'DELETE /boards/:id/posts/:postId/attachments/:assetId': ({ token, ids }) => {
+      'DELETE /community/posts/:id': ({ token, ids }) => {
         this.requireUser(token)
-        const post = this.posts.find((p) => p.id === ids[1])
-        if (!post) throw new ApiError(404, '게시글을(를) 찾을 수 없습니다.')
-        post.attachments = (post.attachments ?? []).filter((a) => a.id !== ids[2])
-        return { detail: '첨부파일을 떼었습니다.' }
+        this.communityPosts = this.communityPosts.filter((p) => p.id !== ids[0])
+        return { detail: '글을 지웠습니다.' }
+      },
+
+      // 게시판 글에 붙인 파일이 곧 공유 재료다 — 낱개로 편 목록.
+      'GET /community/media': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const org = this.communityOrgOf(user)
+        const kind = params?.kind ?? 'image'
+        const items = this.communityPosts
+          .filter((p) => p.org_id === org?.id)
+          .flatMap((p) =>
+            (p.attachments ?? [])
+              .filter((a) => a.kind === kind)
+              .map((a) => ({ id: a.id, title: p.title, asset: a })),
+          )
+          .reverse()
+        return this.paginate(items, params)
+      },
+
+      'GET /community/list': ({ token }) => {
+        const user = this.requireUser(token)
+        const canShare =
+          user.roles.includes('COMMUNITY_USER') ||
+          user.roles.includes('SUPER_ADMIN') ||
+          user.roles.includes('ORG_ADMIN')
+        // 슈퍼관리자는 모든 상위기관 커뮤니티를 쓴다.
+        if (user.roles.includes('SUPER_ADMIN')) {
+          return this.organizations
+            .filter((o) => o.org_type === '기관')
+            .map((o) => ({ org_id: o.id, org_name: o.name, can_share: canShare }))
+        }
+        const org = this.communityOrgOf(user)
+        return org ? [{ org_id: org.id, org_name: org.name, can_share: canShare }] : []
+      },
+
+      'GET /community/contents': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        const items = this.communityContents
+          .filter((c) => c.org_id === orgId)
+          .slice()
+          .reverse()
+        return this.paginate(items, params)
+      },
+
+      'GET /community/contents/:id': ({ token, ids }) => {
+        this.requireUser(token)
+        const content = this.communityContents.find((c) => c.id === ids[0])
+        if (!content) throw new ApiError(404, '커뮤니티 콘텐츠을(를) 찾을 수 없습니다.')
+        return content
+      },
+
+      'POST /community/contents': ({ token, body, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        const content = {
+          id: this.nextId.communityContent++,
+          org_id: orgId,
+          author_id: user.id,
+          author_name: user.name,
+          title: body.title,
+          version: 1,
+          created_at: new Date().toISOString(),
+          // CMS 콘텐츠와 같은 문서 계약. 비우면 빈 캔버스로 시작한다.
+          document: body.document ?? {
+            version: 1,
+            layout: { width: 1920, height: 1080, background: '#000000' },
+            elements: [],
+          },
+          element_count: (body.document?.elements ?? []).length,
+          start_date: null,
+          end_date: null,
+          audience: '전체',
+          can_remove: true,
+        }
+        this.communityContents.push(content)
+        return content
+      },
+
+      'PUT /community/contents/:id': ({ token, ids, body }) => {
+        this.requireUser(token)
+        const content = this.communityContents.find((c) => c.id === ids[0])
+        if (!content) throw new ApiError(404, '커뮤니티 콘텐츠을(를) 찾을 수 없습니다.')
+        if (body.title !== undefined && body.title !== null) content.title = body.title
+        if (body.document) {
+          content.document = body.document
+          content.element_count = (body.document.elements ?? []).length
+        }
+        // 빈 문자열은 '기간 지움'. undefined 는 '건드리지 않음' — 실제 서버와 같다.
+        if (body.start_date !== undefined) content.start_date = body.start_date || null
+        if (body.end_date !== undefined) content.end_date = body.end_date || null
+        if (body.audience !== undefined && body.audience !== null) {
+          if (!['전체', '초', '중', '고'].includes(body.audience)) {
+            throw new ApiError(400, '사용대상은 전체·초·중·고 중 하나여야 합니다.')
+          }
+          content.audience = body.audience
+        }
+        content.version += 1
+        return content
+      },
+
+      // -------------------------------------------------- 커뮤니티 재생목록
+
+      'GET /community/playlists': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        const items = this.communityPlaylists
+          .filter((p) => p.org_id === orgId)
+          .slice()
+          .reverse()
+          .map((p) => this.publicCommunityPlaylist(p))
+        return this.paginate(items, params)
+      },
+
+      'POST /community/playlists': ({ token, body, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        const playlist = {
+          id: this.nextId.communityPlaylist++,
+          org_id: orgId,
+          author_id: user.id,
+          author_name: user.name,
+          name: body.name,
+          items: this.cleanCommunityPlaylistItems(orgId, body.items),
+          version: 1,
+          created_at: new Date().toISOString(),
+          can_remove: true,
+        }
+        this.communityPlaylists.push(playlist)
+        return this.publicCommunityPlaylist(playlist)
+      },
+
+      'PUT /community/playlists/:id': ({ token, body, ids }) => {
+        this.requireUser(token)
+        const playlist = this.communityPlaylists.find((p) => p.id === ids[0])
+        if (!playlist) throw new ApiError(404, '커뮤니티 재생목록을(를) 찾을 수 없습니다.')
+        if (body.name !== undefined && body.name !== null) playlist.name = body.name
+        if (body.items) playlist.items = this.cleanCommunityPlaylistItems(playlist.org_id, body.items)
+        playlist.version += 1
+        return this.publicCommunityPlaylist(playlist)
+      },
+
+      'DELETE /community/playlists/:id': ({ token, ids }) => {
+        this.requireUser(token)
+        this.communityPlaylists = this.communityPlaylists.filter((p) => p.id !== ids[0])
+        return { detail: '재생목록을 지웠습니다.' }
+      },
+
+      'DELETE /community/contents/:id': ({ token, ids }) => {
+        this.requireUser(token)
+        this.communityContents = this.communityContents.filter((c) => c.id !== ids[0])
+        return { detail: '콘텐츠를 지웠습니다.' }
       },
 
       'GET /widgets': ({ token }) => {

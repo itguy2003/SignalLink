@@ -27,9 +27,9 @@ DbSession = Annotated[Session, Depends(get_db)]
 #: 열 것만 적어 두면 새로 생긴 것은 자동으로 닫힌다.
 COMMUNITY_PATHS: tuple[str, ...] = (
     "/auth",
-    "/boards",
-    # 첨부파일을 브라우저가 <img>/<video> 로 받아 간다. 파일 내려받기는
-    # 열쇠가 붙은 주소라 이미 그 자체로 보호된다(``models/asset.token``).
+    "/community",
+    # 공유 이미지·동영상을 브라우저가 <img>/<video> 로 받아 간다. 파일
+    # 내려받기는 열쇠가 붙은 주소라 그 자체로 보호된다(``models/asset.token``).
     "/assets",
 )
 
@@ -73,14 +73,14 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN, detail="승인 대기 중인 계정입니다."
         )
 
-    # 커뮤니티 유저는 게시판 바깥으로 나가지 못한다. 화면에서 메뉴를 숨기는
-    # 것만으로는 주소창에 직접 치고 들어오는 것을 막을 수 없다.
+    # 커뮤니티 유저는 커뮤니티 바깥으로 나가지 못한다. 화면에서 메뉴를
+    # 숨기는 것만으로는 주소창에 직접 치고 들어오는 것을 막을 수 없다.
     if permissions.is_community_user(user):
         path = request.url.path.removeprefix(settings.API_V1_PREFIX)
         if not _is_open_to_community(path):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="게시판만 사용할 수 있는 계정입니다.",
+                detail="커뮤니티만 사용할 수 있는 계정입니다.",
             )
     return user
 

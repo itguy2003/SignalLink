@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { COMMUNITY_ROUTES, useAuthStore } from '@/stores/auth'
+import { COMMUNITY_ADMIN_ROUTES, COMMUNITY_ROUTES, useAuthStore } from '@/stores/auth'
 
 /**
  * 라우트 메타
@@ -91,10 +91,36 @@ const routes = [
     meta: { titleKey: 'content.title' },
   },
   {
+    // 커뮤니티 — 상위기관 단위의 공유 공간. 역할 제한이 없다: 어느 커뮤니티를
+    // 보는지는 서버가 소속 기관에서 정하고, 올릴 수 있는지도 서버가 답한다.
+    path: '/community/board',
+    name: 'community-board',
+    component: () => import('@/views/CommunityBoardView.vue'),
+    meta: { titleKey: 'nav.communityBoard' },
+  },
+  {
+    path: '/community/playlists',
+    name: 'community-playlists',
+    component: () => import('@/views/CommunityPlaylistsView.vue'),
+    meta: { titleKey: 'nav.communityPlaylists' },
+  },
+  {
+    path: '/community/contents',
+    name: 'community-contents',
+    component: () => import('@/views/CommunityContentsView.vue'),
+    meta: { titleKey: 'nav.communityContents' },
+  },
+  {
+    path: '/community/contents/:id/editor',
+    name: 'community-content-editor',
+    component: () => import('@/views/CommunityContentEditorView.vue'),
+    meta: { titleKey: 'community.contentsTitle' },
+  },
+  {
     path: '/boards',
     name: 'boards',
     component: () => import('@/views/BoardsView.vue'),
-    meta: { titleKey: 'nav.boards', roles: ['SUPER_ADMIN', 'ORG_ADMIN', 'COMMUNITY_USER'] },
+    meta: { titleKey: 'nav.boards', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -125,10 +151,21 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
-  // 커뮤니티 유저는 게시판 바깥으로 나가지 못한다. 대시보드조차 그 사람의
-  // 화면이 아니므로 돌려보낼 곳도 게시판이다.
+  // 커뮤니티 유저는 커뮤니티 바깥으로 나가지 못한다. 대시보드조차 그 사람의
+  // 화면이 아니므로 돌려보낼 곳도 커뮤니티다.
   if (auth.isCommunityUser && !COMMUNITY_ROUTES.includes(to.name)) {
-    return { name: 'boards' }
+    return { name: 'community-board' }
+  }
+
+  // 커뮤니티는 기관관리자와 커뮤니티 유저의 공간이다. 다른 역할은 메뉴도
+  // 없지만, 주소를 쳐도 여기서 돌려보낸다(서버도 403 으로 막는다).
+  if (String(to.name ?? '').startsWith('community') && !auth.can.useCommunity) {
+    return { name: 'dashboard' }
+  }
+
+  // 콘텐츠·재생목록은 관리자의 운영 화면이다.
+  if (COMMUNITY_ADMIN_ROUTES.includes(to.name) && !auth.can.manageCommunity) {
+    return { name: 'community-board' }
   }
 
   if (to.meta.roles && !auth.hasRole(...to.meta.roles)) {

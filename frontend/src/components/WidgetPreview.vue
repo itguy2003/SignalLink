@@ -15,6 +15,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AlbumSlides from '@/components/AlbumSlides.vue'
+import CommunityCycle from '@/components/CommunityCycle.vue'
 import {
   daysUntil,
   formatClock,
@@ -218,6 +219,16 @@ const unit = computed(() => Math.max(10, Math.min(props.width, props.height) / 1
       <div class="weather-meta">{{ sample.high }} / {{ sample.low }}</div>
     </div>
 
+    <!-- 커뮤니티 위젯: 미리보기에서는 서버 데이터로 실제 순환을 그리고,
+         편집 중에는 무엇을 트는지만 알려 준다(자리를 잡는 동안 돌면 눈이
+         붙잡힌다). -->
+    <CommunityCycle v-else-if="widgetKey === 'community' && playing" :options="options" />
+    <!-- 편집 중 카드. 무엇을 틀지는 서버가 고른다(기간·대상) — 여기서는
+         커뮤니티 위젯이라는 것만 알린다. -->
+    <div v-else-if="widgetKey === 'community'" class="center community-card">
+      <span class="chip">🤝 {{ name }}</span>
+    </div>
+
     <!-- 이미지앨범: 넣어 둔 사진을 실제 간격·효과로 넘긴다. -->
     <AlbumSlides v-else-if="widgetKey === 'album'" :options="options" :playing="playing">
       <template #empty>
@@ -243,6 +254,15 @@ const unit = computed(() => Math.max(10, Math.min(props.width, props.height) / 1
 </template>
 
 <style scoped>
+.community-card {
+  gap: 0.4em;
+}
+
+.community-card .period {
+  font-size: 0.6em;
+  color: #94a3b8;
+}
+
 .preview {
   position: absolute;
   top: 0;

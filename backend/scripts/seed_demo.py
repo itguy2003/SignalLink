@@ -22,6 +22,9 @@ from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models.asset import Asset, ContentAsset
 from app.models.board import BoardPost, OrgBoard
+from app.models.community import CommunityPost, CommunityPostAsset
+from app.models.community_content import CommunityContent, CommunityContentAsset
+from app.models.community_playlist import CommunityPlaylist
 from app.models.content import Content
 from app.models.device import (
     Device,
@@ -59,6 +62,11 @@ ADMIN_PASSWORD = "admin1234"
 
 #: 지우는 순서. 자식(참조하는 쪽)을 먼저 지워야 외래키가 걸리지 않는다.
 DELETE_ORDER = [
+    CommunityPlaylist,
+    CommunityContentAsset,
+    CommunityContent,
+    CommunityPostAsset,
+    CommunityPost,
     ContentAsset,
     Asset,
     ContentPlaylist,
@@ -164,16 +172,6 @@ def seed(db) -> dict:  # noqa: ANN001, C901 - 시드는 원래 길다
 
     gaon, narae, dasom = schools
 
-    # 기관에 딸린 곳. 커뮤니티 유저가 소속되는 자리다 — 학교에는 두지 않는다.
-    library = Organization(
-        name="인천교육청 부설도서관",
-        org_type=OrgType.AFFILIATE,
-        parent_id=office.id,
-        address="인천광역시 남동구 정각로 20",
-    )
-    db.add(library)
-    db.flush()
-
     # ------------------------------------------------------------ 사용자
     def make_user(user_id, name, org, roles, *, status=UserStatus.APPROVED, phone=None):  # noqa: ANN001
         user = User(
@@ -199,7 +197,7 @@ def seed(db) -> dict:  # noqa: ANN001, C901 - 시드는 원래 길다
         make_user("teacher", "3학년 2반 담임", gaon, [Role.HOMEROOM_TEACHER], phone="032-444-4444"),
         make_user("member", "일반 교직원", narae, [], phone="032-555-5555"),
         make_user("pending", "승인 대기 교사", dasom, [], status=UserStatus.PENDING),
-        make_user("community", "도서관 이용자", library, [Role.COMMUNITY_USER]),
+        make_user("community", "지역 주민", office, [Role.COMMUNITY_USER]),
     ]
     db.flush()
     by_id = {u.user_id: u for u in accounts}
@@ -517,6 +515,70 @@ def seed(db) -> dict:  # noqa: ANN001, C901 - 시드는 원래 길다
         ]
     )
 
+    # ------------------------------------------------------------ 커뮤니티
+    # 커뮤니티는 상위기관(교육청)에만 있다. 학교 구성원과 지역 주민이 함께
+    # 쓰는 공간이라, 학교 하나보다 넓은 단위에 두어야 서로 만난다.
+    resident = by_id["community"]
+    db.add(
+        CommunityPost(
+            org_id=office.id,
+            author_id=resident.id,
+            title="주말 가족 독서 모임을 엽니다",
+            content="이번 주 토요일 오전 10시, 교육청 1층 열린도서실에서 만나요.",
+        )
+    )
+    db.add(
+        CommunityPost(
+            org_id=office.id,
+            author_id=by_id["office"].id,
+            title="커뮤니티 이용 안내",
+            content="공유 게시판과 공유 이미지·동영상은 커뮤니티 유저와 관리자가 올릴 수 있습니다.",
+        )
+    )
+    db.flush()
+
+    # 커뮤니티 콘텐츠 — CMS 와 같은 캔버스 문서. 커뮤니티 위젯이 그대로 튼다.
+    db.add(
+        CommunityContent(
+            org_id=office.id,
+            author_id=resident.id,
+            title="시월 커뮤니티 소식",
+            document={
+                "version": 1,
+                "layout": {"width": 1920, "height": 1080, "background": "#0f172a"},
+                "elements": [
+                    {
+                        "id": "t1",
+                        "type": "text",
+                        "rect": {"x": 160, "y": 120, "w": 1600, "h": 200, "z": 1, "rotation": 0},
+                        "opacity": 1,
+                        "options": {
+                            "text": "시월 커뮤니티 소식",
+                            "fontSize": 96,
+                            "color": "#f8fafc",
+                            "align": "center",
+                            "bold": True,
+                        },
+                    },
+                    {
+                        "id": "t2",
+                        "type": "text",
+                        "rect": {"x": 260, "y": 420, "w": 1400, "h": 400, "z": 2, "rotation": 0},
+                        "opacity": 1,
+                        "options": {
+                            "text": "주말 가족 독서 모임 · 토요일 오전 10시\n교육청 1층 열린도서실",
+                            "fontSize": 56,
+                            "color": "#cbd5e1",
+                            "align": "center",
+                            "bold": False,
+                        },
+                    },
+                ],
+            },
+        )
+    )
+    db.flush()
+
     # ------------------------------------------------------------ 기관 게시판
     board = OrgBoard(
         org_id=gaon.id,
@@ -530,35 +592,7 @@ def seed(db) -> dict:  # noqa: ANN001, C901 - 시드는 원래 길다
     db.add(board)
     db.flush()
 
-    # 부설기관 게시판. 커뮤니티 유저가 읽고 글을 올리는 곳이다.
-    library_board = OrgBoard(
-        org_id=library.id,
-        kind=BoardKind.BOARD,
-        url="https://library.ice.go.kr/notice",
-        scrape_method="html:table",
-        scrape_result=ScrapeResult.SUCCESS,
-        scrape_count=2,
-        last_scraped_at=now - timedelta(hours=5),
-    )
-    db.add(library_board)
-    db.flush()
-
     today = date.today()
-    for offset, title in enumerate(["도서관 휴관일 안내", "겨울 독서교실 신청"]):
-        posted = today - timedelta(days=offset * 2)
-        db.add(
-            BoardPost(
-                board_id=library_board.id,
-                title=title,
-                author="도서관",
-                posted_on=posted,
-                year=posted.year,
-                month=posted.month,
-                day=posted.day,
-                content=f"{title} 상세 내용입니다.",
-            )
-        )
-
     for offset, title in enumerate(
         [
             "2학기 학부모 상담 주간 안내",

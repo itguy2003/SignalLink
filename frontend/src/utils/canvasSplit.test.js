@@ -132,6 +132,52 @@ describe('영역 계산', () => {
   })
 })
 
+describe('정보 표시줄과 분할', () => {
+  // 표시줄(72px)이 켜져 있으면 그 띠는 배치 영역이 아니다 — 분할 영역과
+  // 분할선이 모두 그 밑에서 계산돼야 첫 행이 표시줄에 깔리지 않는다.
+
+  const BAR_LANDSCAPE = { ...LANDSCAPE, info_bar: true }
+  const BAR_PORTRAIT = { ...PORTRAIT, info_bar: true }
+
+  it('분할 없음도 표시줄을 뺀 나머지가 한 영역이다', () => {
+    expect(computeRegions(BAR_LANDSCAPE, SPLIT_NONE)).toEqual([
+      { index: 0, x: 0, y: 72, w: 1920, h: 1008 },
+    ])
+  })
+
+  it('행 나눔은 표시줄 아래 높이를 나눈다', () => {
+    const regions = computeRegions(BAR_LANDSCAPE, 'grid4')
+    expect(regions[0]).toEqual({ index: 0, x: 0, y: 72, w: 960, h: 504 })
+    expect(regions[3]).toEqual({ index: 3, x: 960, y: 576, w: 960, h: 504 })
+  })
+
+  it('세로형 3분할도 표시줄 밑에서 3등분한다', () => {
+    const regions = computeRegions(BAR_PORTRAIT, 'v3')
+    expect(regions.map((r) => r.y)).toEqual([72, 688, 1304])
+    expect(regions.every((r) => r.h === 616)).toBe(true)
+  })
+
+  it('영역을 합치면 표시줄 아래를 빈틈없이 덮는다', () => {
+    const regions = computeRegions(BAR_LANDSCAPE, 'grid4')
+    const area = regions.reduce((sum, r) => sum + r.w * r.h, 0)
+    expect(area).toBe(1920 * (1080 - 72))
+  })
+
+  it('가로 분할선도 표시줄만큼 내려온다', () => {
+    const dividers = computeDividers(BAR_LANDSCAPE, 'grid4')
+    const horizontal = dividers.find((d) => d.axis === 'y')
+    expect(horizontal.position).toBe(72 + 504)
+    // 세로선의 x 는 표시줄과 무관하다.
+    expect(dividers.find((d) => d.axis === 'x').position).toBe(960)
+  })
+
+  it('표시줄이 꺼져 있으면 예전 계산 그대로다', () => {
+    expect(computeRegions({ ...LANDSCAPE, info_bar: false }, 'h2')).toEqual(
+      computeRegions(LANDSCAPE, 'h2'),
+    )
+  })
+})
+
 describe('저장된 분할 읽기', () => {
   it('없으면 분할 없음이다', () => {
     expect(readSplit({ width: 1920, height: 1080 })).toMatchObject({ key: SPLIT_NONE, gap: 0 })

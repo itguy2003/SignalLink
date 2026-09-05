@@ -25,6 +25,7 @@ from app.schemas.auth import (
     LoginRequest,
     MeResponse,
     PasswordChangeRequest,
+    ProfileUpdateRequest,
     RegisterRequest,
     TokenResponse,
     UserIdCheckResponse,
@@ -39,6 +40,8 @@ def _me(db_user: User, org_name: str | None) -> MeResponse:
         id=db_user.id,
         user_id=db_user.user_id,
         name=db_user.name,
+        phone=db_user.phone,
+        email=db_user.email,
         org_id=db_user.org_id,
         org_name=org_name,
         status=db_user.status,
@@ -159,6 +162,27 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> TokenRespon
 
 @router.get("/me", response_model=MeResponse, summary="내 정보")
 def me(user: CurrentUser, db: DbSession) -> MeResponse:
+    org = db.get(Organization, user.org_id)
+    return _me(user, org.name if org else None)
+
+
+@router.put("/me", response_model=MeResponse, summary="내 정보 변경")
+def update_me(payload: ProfileUpdateRequest, user: CurrentUser, db: DbSession) -> MeResponse:
+    """이름·연락처·이메일을 본인이 고친다.
+
+    ``/users/{id}`` 를 쓰지 않는 이유는 커뮤니티 유저 때문이다 — 그 경로는
+    울타리 밖이라 닿지 못하는데, 자기 정보 변경은 누구에게나 있어야 한다.
+    소속과 역할은 여기서 못 바꾼다(그건 관리자의 일이다).
+    """
+    if payload.name is not None:
+        user.name = payload.name.strip()
+    if payload.phone is not None:
+        user.phone = payload.phone.strip() or None
+    if payload.email is not None:
+        user.email = str(payload.email)
+    db.commit()
+    db.refresh(user)
+
     org = db.get(Organization, user.org_id)
     return _me(user, org.name if org else None)
 

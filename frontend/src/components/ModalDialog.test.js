@@ -114,6 +114,16 @@ describe('버튼 상태', () => {
     expect(mountDialog().find('.dialog-foot .btn-primary').text()).toBe('저장')
   })
 
+  it('높이를 주면 창 크기가 내용에 따라 변하지 않는다', () => {
+    // 내용에 따라 창이 커졌다 작아졌다 하면 단추 위치가 흔들린다.
+    // 넘치는 내용은 본문 스크롤의 몫이다.
+    const fixed = mountDialog({ height: '80vh' })
+    expect(fixed.find('.dialog').attributes('style')).toContain('height: 80vh')
+
+    const auto = mountDialog()
+    expect(auto.find('.dialog').attributes('style') ?? '').not.toContain('height')
+  })
+
   it('바닥글을 숨길 수 있다', () => {
     expect(mountDialog({ hideFooter: true }).find('.dialog-foot').exists()).toBe(false)
   })

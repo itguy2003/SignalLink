@@ -25,6 +25,8 @@ class AssetOut(BaseModel):
     #: 문서의 ``src`` 에 그대로 넣는 주소. 서버가 정하므로 클라이언트가
     #: 경로 규칙을 알 필요가 없다.
     url: str = ""
+    #: 목록용 축소 이미지 주소. 없으면 화면이 원본(url)으로 그린다.
+    thumb_url: str | None = None
     org_name: str | None = None
     #: 이 자산을 쓰는 콘텐츠 수. 삭제 가능 여부 판단에 쓴다.
     usage_count: int = 0

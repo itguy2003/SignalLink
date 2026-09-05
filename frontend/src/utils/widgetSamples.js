@@ -230,10 +230,22 @@ const SAMPLES = {
     },
   },
   weather: {
-    ko: { place: '서울 종로구', temp: '24°', condition: '맑음', icon: '☀', high: '27°', low: '19°' },
-    en: { place: 'Jongno, Seoul', temp: '24°', condition: 'Clear', icon: '☀', high: '27°', low: '19°' },
-    ja: { place: 'ソウル鍾路区', temp: '24°', condition: '晴れ', icon: '☀', high: '27°', low: '19°' },
-    zh: { place: '首尔钟路区', temp: '24°', condition: '晴', icon: '☀', high: '27°', low: '19°' },
+    ko: {
+      place: '서울 종로구', temp: '24°', condition: '맑음', icon: '☀', high: '27°', low: '19°',
+      dust: '보통', pm10: 45,
+    },
+    en: {
+      place: 'Jongno, Seoul', temp: '24°', condition: 'Clear', icon: '☀', high: '27°', low: '19°',
+      dust: 'Moderate', pm10: 45,
+    },
+    ja: {
+      place: 'ソウル鍾路区', temp: '24°', condition: '晴れ', icon: '☀', high: '27°', low: '19°',
+      dust: '普通', pm10: 45,
+    },
+    zh: {
+      place: '首尔钟路区', temp: '24°', condition: '晴', icon: '☀', high: '27°', low: '19°',
+      dust: '中等', pm10: 45,
+    },
   },
   album: {
     ko: { caption: '가을 운동회 사진 (1/12)' },

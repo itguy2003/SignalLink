@@ -40,8 +40,10 @@ describe('역할 목록', () => {
     expect(ASSIGNABLE_ROLES).toContain('COMMUNITY_USER')
   })
 
-  it('열어 두는 화면은 게시판뿐이다', () => {
-    expect(COMMUNITY_ROUTES).toEqual(['boards'])
+  it('열어 두는 화면은 커뮤니티 서브 메뉴뿐이다', () => {
+    // 이미지·동영상 화면은 게시판으로 합쳐졌고, 콘텐츠·재생목록은
+    // 관리자의 운영 화면이다 — 커뮤니티 유저에게는 게시판 하나다.
+    expect(COMMUNITY_ROUTES).toEqual(['community-board'])
   })
 })
 
@@ -64,9 +66,9 @@ describe('커뮤니티 유저 판정', () => {
 })
 
 describe('할 수 있는 일', () => {
-  it('커뮤니티 유저는 글을 올릴 수 있다', () => {
-    // 게시판이 그 사람에게 열려 있는 유일한 창구다.
-    expect(asUser('COMMUNITY_USER').can.writePosts).toBe(true)
+  it('커뮤니티 유저는 커뮤니티에 올릴 수 있다', () => {
+    // 커뮤니티가 그 사람에게 열려 있는 유일한 공간이다.
+    expect(asUser('COMMUNITY_USER').can.shareInCommunity).toBe(true)
   })
 
   it('커뮤니티 유저는 수집원을 손대지 못한다', () => {
@@ -83,15 +85,15 @@ describe('할 수 있는 일', () => {
     expect(can.manageSchedules).toBe(false)
   })
 
-  it('관리자는 글도 올리고 수집원도 다룬다', () => {
+  it('관리자는 커뮤니티에도 올리고 수집원도 다룬다', () => {
     const can = asUser('ORG_ADMIN').can
 
-    expect(can.writePosts).toBe(true)
+    expect(can.shareInCommunity).toBe(true)
     expect(can.manageBoards).toBe(true)
   })
 
-  it('일반 회원은 글을 올리지 못한다', () => {
-    // 게시판을 쓰라고 만든 역할은 커뮤니티 유저 쪽이다.
-    expect(asUser().can.writePosts).toBe(false)
+  it('일반 회원은 보기만 한다', () => {
+    // 올리라고 만든 역할이 커뮤니티 유저다.
+    expect(asUser().can.shareInCommunity).toBe(false)
   })
 })

@@ -29,6 +29,7 @@ router = APIRouter(prefix="/assets", tags=["자산"])
 def _to_out(db: DbSession, asset: Asset) -> AssetOut:
     out = AssetOut.model_validate(asset)
     out.url = asset_service.public_url(asset)
+    out.thumb_url = asset_service.thumb_url(asset)
     org = db.get(Organization, asset.org_id)
     out.org_name = org.name if org else None
     # 콘텐츠와 재생목록을 함께 센다(``asset_service.usage_count`` 와 같은 규칙).
@@ -107,24 +108,23 @@ async def upload_asset(
     if not permissions.can_manage_org(db, actor, target_org):
         raise forbid("해당 기관에 파일을 올릴 권한이 없습니다.")
 
-    data = await file.read()
-    if not data:
-        raise bad_request("빈 파일입니다.")
+    # 조각으로 받아 쓴다. 10GB 동영상을 통째로 메모리에 올리면 서버가 쓰러진다.
+    try:
+        stored, size = await asset_service.store_stream(file, kind, file.content_type)
+    except asset_service.UploadRejected as exc:
+        raise bad_request(str(exc)) from exc
 
-    limit = asset_service.max_bytes(kind)
-    if len(data) > limit:
-        raise bad_request(f"파일은 {limit // (1024 * 1024)}MB 이하여야 합니다.")
-
-    stored = asset_service.store(data, kind, file.content_type)
     asset = Asset(
         org_id=target_org,
         uploaded_by=actor.id,
         kind=kind,
         filename=file.filename or "upload",
         content_type=file.content_type,
-        size_bytes=len(data),
+        size_bytes=size,
         storage_path=stored,
     )
+    # 목록은 원본 대신 이것을 그린다. 실패하면 None — 업로드는 그대로 성공.
+    asset_service.attach_thumbnail(asset)
     db.add(asset)
     db.commit()
     db.refresh(asset)
@@ -168,6 +168,24 @@ def download_asset(asset_id: int, token: str, db: DbSession) -> Response:
         filename=asset.filename,
         # 내용이 바뀌지 않는 파일이다(바꾸려면 새로 올린다). 장치가 매번
         # 다시 받으면 폐쇄망의 좁은 회선을 그만큼 잡아먹는다.
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
+
+
+@router.get("/{asset_id}/{token}/thumb", summary="자산 썸네일 내려받기")
+def download_thumb(asset_id: int, token: str, db: DbSession) -> Response:
+    """목록용 축소 이미지. 원본과 같은 열쇠 규칙으로 인증 없이 연다."""
+    asset = db.get(Asset, asset_id)
+    if asset is None or token != asset.token or not asset.thumb_path:
+        raise not_found("썸네일")
+
+    path = asset_service.media_root() / asset.thumb_path
+    if not path.exists():
+        raise not_found("썸네일")
+
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=604800, immutable"},
     )
 

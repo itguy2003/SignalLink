@@ -41,13 +41,41 @@ const props = defineProps({
   orientation: { type: String, default: null },
   /** 여러 장을 한 번에 고를지. 켜면 `select-many` 로 배열을 올린다. */
   multiple: { type: Boolean, default: false },
+  /**
+   * 'default' | 'community'. 커뮤니티 콘텐츠 편집기는 재료가 다르다 —
+   * 공유 이미지·동영상 / 라이브러리 / 외부 링크만 쓰고, 업로드와 스톡 검색은
+   * 없다(공유는 커뮤니티 화면에서 하고, 검색으로 받은 것도 결국 업로드다).
+   */
+  variant: { type: String, default: 'default' },
 })
 
 const emit = defineEmits(['select', 'select-many'])
 
 const { t } = useI18n()
 
-const tab = ref('upload')
+const isCommunity = computed(() => props.variant === 'community')
+
+const tab = ref(props.variant === 'community' ? 'shared' : 'upload')
+
+/** 커뮤니티에 공유된 이미지·동영상(커뮤니티 변형에서만 받는다). */
+const shared = ref([])
+const sharedLoading = ref(false)
+const sharedError = ref('')
+
+async function loadShared() {
+  sharedLoading.value = true
+  sharedError.value = ''
+  try {
+    // 게시판 글에 붙인 파일이 곧 공유 재료다. 서버가 낱개로 편 채 준다.
+    const page = await api.get('/community/media', { kind: props.kind, size: 100 })
+    shared.value = page?.items ?? []
+  } catch (err) {
+    shared.value = []
+    sharedError.value = err?.detail ?? t('media.loadFailed')
+  } finally {
+    sharedLoading.value = false
+  }
+}
 
 const assets = ref([])
 const loading = ref(false)
@@ -120,7 +148,10 @@ async function loadAssets() {
   }
 }
 
-onMounted(loadAssets)
+onMounted(() => {
+  loadAssets()
+  if (isCommunity.value) loadShared()
+})
 
 /**
  * 고른 것을 부르는 쪽에 올린다.
@@ -259,13 +290,32 @@ function chooseLink() {
 <template>
   <div class="media-source">
     <div class="tabs">
-      <button class="tab" :class="{ active: tab === 'upload' }" @click="tab = 'upload'">
+      <!-- 커뮤니티 변형: 공유물이 첫 재료다. -->
+      <button
+        v-if="isCommunity"
+        class="tab"
+        :class="{ active: tab === 'shared' }"
+        @click="tab = 'shared'"
+      >
+        {{ isImage ? t('community.imagesTitle') : t('community.videosTitle') }}
+      </button>
+      <button
+        v-if="!isCommunity"
+        class="tab"
+        :class="{ active: tab === 'upload' }"
+        @click="tab = 'upload'"
+      >
         {{ t('media.tabUpload') }}
       </button>
       <button class="tab" :class="{ active: tab === 'library' }" @click="tab = 'library'">
         {{ t('media.tabLibrary') }}
       </button>
-      <button class="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">
+      <button
+        v-if="!isCommunity"
+        class="tab"
+        :class="{ active: tab === 'search' }"
+        @click="tab = 'search'"
+      >
         {{ t('media.tabSearch') }}
       </button>
       <button class="tab" :class="{ active: tab === 'link' }" @click="tab = 'link'">
@@ -273,8 +323,36 @@ function chooseLink() {
       </button>
     </div>
 
+    <!-- 공유 이미지·동영상: 커뮤니티에 올려진 것에서 고른다. -->
+    <div v-if="tab === 'shared'" class="pane">
+      <p v-if="sharedLoading" class="hint">{{ t('common.loading') }}</p>
+      <p v-else-if="sharedError" class="error-text">{{ sharedError }}</p>
+      <p v-else-if="shared.length === 0" class="hint">{{ t('community.noMaterials') }}</p>
+
+      <div v-else class="asset-grid">
+        <button
+          v-for="row in shared"
+          :key="row.id"
+          class="asset"
+          type="button"
+          :title="row.title"
+          @click="emit('select', { src: row.asset.url, asset: row.asset })"
+        >
+          <img
+            v-if="row.asset.kind === 'image'"
+            class="asset-thumb"
+            :src="row.asset.thumb_url || row.asset.url"
+            alt=""
+          />
+          <span v-else class="asset-thumb video">🎬</span>
+          <span class="asset-name">{{ row.title }}</span>
+          <span class="muted small">{{ row.uploader_name ?? '-' }}</span>
+        </button>
+      </div>
+    </div>
+
     <!-- 업로드 -->
-    <div v-if="tab === 'upload'" class="pane">
+    <div v-else-if="tab === 'upload'" class="pane">
       <label
         class="drop"
         :class="{ over: dragOver }"

@@ -10,7 +10,6 @@ from app.db.base import Base, TimestampMixin
 from app.models.enums import BoardKind
 
 if TYPE_CHECKING:
-    from app.models.asset import BoardPostAsset
     from app.models.organization import Organization
 
 
@@ -61,14 +60,3 @@ class BoardPost(Base):
     content: Mapped[str | None] = mapped_column(Text)
 
     board: Mapped[OrgBoard] = relationship(back_populates="posts")
-    #: 붙인 이미지·동영상의 연결. 올린 차례대로 보여 준다.
-    #:
-    #: 이름을 ``attachments`` 로 두지 않은 이유는, 내보내는 스키마의
-    #: ``attachments`` 가 **자산 목록**이라 같은 이름이면 검증이 연결 행을
-    #: 자산으로 읽으려 하기 때문이다.
-    attachment_links: Mapped[list[BoardPostAsset]] = relationship(
-        back_populates="post",
-        cascade="all, delete-orphan",
-        order_by="BoardPostAsset.sort_order",
-        lazy="selectin",
-    )

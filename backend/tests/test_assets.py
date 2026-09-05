@@ -397,3 +397,90 @@ def test_playlist_album_link_follows_edits(client, super_headers, school_id, upl
 
     body = client.get(f"/api/v1/assets/{asset['id']}", headers=super_headers).json()
     assert body["usage_count"] == 0
+
+
+# ------------------------------------------------------------------ 동영상 상한
+
+# 상한은 10GB 다. 이 크기부터는 통째로 메모리에 올리면 서버가 먼저 쓰러지므로,
+# 업로드는 조각으로 받아 쓰고 상한을 넘는 순간 끊는다.
+
+
+def test_video_limit_is_10gb():
+    assert asset_service.max_bytes("video") == 10 * 1024 * 1024 * 1024
+
+
+def test_oversize_video_is_cut_off(client, super_headers, upload, media_root, monkeypatch):  # noqa: ANN001
+    # 진짜 10GB 를 보낼 수는 없다. 상한만 줄여 같은 길을 밟는다.
+    monkeypatch.setattr(asset_service.settings, "MAX_VIDEO_BYTES", 100)
+
+    response = upload("큰영상.mp4", MP4 + b"0" * 200, "video/mp4")
+    assert response.status_code == 400
+    assert "MB" in response.json()["detail"]
+
+    # 반쯤 쓴 파일이 남으면 디스크에 유령이 쌓인다.
+    leftovers = [p for p in media_root.rglob("*") if p.is_file()]
+    assert leftovers == []
+
+
+def test_streamed_upload_records_the_real_size(client, super_headers, upload):  # noqa: ANN001
+    body = upload("영상.mp4", MP4 + b"0" * 1000, "video/mp4").json()
+    assert body["size_bytes"] == len(MP4) + 1000
+
+
+# ------------------------------------------------------------------ 썸네일
+
+# 목록은 원본 대신 축소본을 그린다. 축소본은 부가물이라, 못 만드는 파일이어도
+# 업로드는 성공해야 한다.
+
+
+def _real_png(size: tuple[int, int] = (800, 600)) -> bytes:
+    """Pillow 가 실제로 읽을 수 있는 PNG. 위의 PNG 상수는 머리만 흉내낸 가짜다."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", size, "#3366ff").save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def test_image_upload_gets_a_thumbnail(client, upload):
+    body = upload("photo.png", _real_png(), "image/png").json()
+    assert body["thumb_url"]
+    assert body["thumb_url"].endswith("/thumb")
+
+    response = client.get(body["thumb_url"])
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+
+
+def test_thumbnail_is_scaled_down(upload, media_root):
+    from PIL import Image
+
+    upload("photo.png", _real_png((1920, 1080)), "image/png")
+
+    thumb = next(media_root.rglob("*.thumb.jpg"))
+    with Image.open(thumb) as image:
+        assert max(image.size) <= 480
+
+
+def test_broken_image_still_uploads(upload):
+    # 위의 PNG 상수는 디코딩이 안 되는 가짜다 — 썸네일만 빠지고 업로드는 된다.
+    body = upload().json()
+    assert body["thumb_url"] is None
+
+
+def test_fake_video_still_uploads(upload):
+    # 진짜 영상이 아니라 ffmpeg 이 프레임을 못 뽑는다. 그래도 업로드는 된다.
+    body = upload("intro.mp4", MP4, "video/mp4").json()
+    assert body["thumb_url"] is None
+
+
+def test_delete_removes_the_thumbnail_too(client, super_headers, upload, media_root):
+    # 원본만 지우면 축소본이 디스크에 유령으로 남는다.
+    asset = upload("photo.png", _real_png(), "image/png").json()
+    assert list(media_root.rglob("*.thumb.jpg"))
+
+    response = client.delete(f"/api/v1/assets/{asset['id']}", headers=super_headers)
+    assert response.status_code == 200
+    assert list(media_root.rglob("*.thumb.jpg")) == []

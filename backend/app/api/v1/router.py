@@ -4,6 +4,7 @@ from app.api.v1 import (
     assets,
     auth,
     boards,
+    community,
     contents,
     device_groups,
     devices,
@@ -29,6 +30,7 @@ api_router.include_router(playlists.router)
 api_router.include_router(boards.router)
 api_router.include_router(widgets.router)
 api_router.include_router(stock.router)
+api_router.include_router(community.router)
 api_router.include_router(assets.router)
 api_router.include_router(player.router)
 api_router.include_router(ws.router)

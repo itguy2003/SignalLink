@@ -81,11 +81,11 @@ WebSocket 핸드셰이크 이후 **모든 메시지가 암호화**된다. 평문
 
 클라이언트 구현 대응:
 
-| 스택 | 키 유도 | 암복호화 |
-|---|---|---|
-| JavaScript | `crypto.subtle.deriveBits({name:'HKDF'})` | `crypto.subtle` AES-GCM |
-| .NET | `System.Security.Cryptography.HKDF` | `AesGcm` |
-| Flutter | `package:cryptography` `Hkdf(Hmac.sha256())` | `AesGcm.with256bits()` |
+| 스택         | 키 유도                                         | 암복호화                    |
+| ---------- | -------------------------------------------- | ----------------------- |
+| JavaScript | `crypto.subtle.deriveBits({name:'HKDF'})`    | `crypto.subtle` AES-GCM |
+| .NET       | `System.Security.Cryptography.HKDF`          | `AesGcm`                |
+| Flutter    | `package:cryptography` `Hkdf(Hmac.sha256())` | `AesGcm.with256bits()`  |
 
 ### 3. 하트비트 동기화 (제한사항 5)
 
@@ -111,8 +111,10 @@ CMS 에서 스케줄을 바꾸면 서버가 접속 중인 장치에 `schedule_ch
 임계를 넘기 시작하면 다음 순서로 확장한다.
 
 1. 스케줄 페이로드를 `schedule:{id}:{version}` 키로 캐시 — 페이로드가 버전으로 불변이라
+
    무효화가 단순하다.
 2. uvicorn 워커 증설 + 로드밸런서. 이때 `services/ws_hub.py` 가 프로세스 로컬이므로
+
    서버 푸시를 Redis Pub/Sub 등으로 중계해야 한다(라우터가 `ws_hub` 함수만 호출하도록
    막아 두어 교체 지점이 좁다).
 3. 읽기 전용 복제본으로 스케줄 조회 분리.
@@ -121,10 +123,10 @@ CMS 에서 스케줄을 바꾸면 서버가 접속 중인 장치에 `schedule_ch
 
 `services/permissions.py` 한 곳에 모여 있다. 라우터는 역할 문자열을 직접 비교하지 않는다.
 
-| 역할 | 범위 |
-|---|---|
-| SUPER_ADMIN | 전체 |
-| ORG_ADMIN | 자기 기관 + 모든 하위 기관의 기관/사용자/장치 |
-| DEVICE_MANAGER | 위임받은 장치만 (등록/삭제는 불가) |
-| HOMEROOM_TEACHER | 자기 기관 장치 조회 + 위임받은 장치 관리 |
-| MEMBER | 기본 역할, 본인 정보만 |
+| 역할               | 범위                          |
+| ---------------- | --------------------------- |
+| SUPER_ADMIN      | 전체                          |
+| ORG_ADMIN        | 자기 기관 + 모든 하위 기관의 기관/사용자/장치 |
+| DEVICE_MANAGER   | 위임받은 장치만 (등록/삭제는 불가)        |
+| HOMEROOM_TEACHER | 자기 기관 장치 조회 + 위임받은 장치 관리    |
+| MEMBER           | 기본 역할, 본인 정보만               |

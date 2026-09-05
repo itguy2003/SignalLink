@@ -111,6 +111,11 @@ describe('메뉴 표시 제어', () => {
       '재생목록',
       '콘텐츠',
       '기관 게시판',
+      // 커뮤니티 그룹: 머리글 + 게시판·재생목록·콘텐츠.
+      '커뮤니티',
+      '공유 게시판',
+      '공유 재생목록',
+      '커뮤니티 콘텐츠',
     ])
   })
 
@@ -182,5 +187,32 @@ describe('언어 전환', () => {
     const wrapper = mountLayout()
     const options = wrapper.findAll('.lang-select option').map((o) => o.attributes('value'))
     expect(options).toEqual(['ko', 'en', 'ja', 'zh'])
+  })
+})
+
+describe('커뮤니티 메뉴', () => {
+  it('관리자에게는 서브 메뉴 세 칸이 그룹 아래 들여 선다', () => {
+    const wrapper = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN'] })
+
+    expect(wrapper.findAll('.nav-item.sub')).toHaveLength(3)
+    expect(wrapper.find('.nav-group').text()).toContain('커뮤니티')
+  })
+
+  it('일반 회원에게는 보이지 않는다', () => {
+    // 커뮤니티는 기관관리자와 커뮤니티 유저의 공간이다. 서버도 403 으로 막는다.
+    const wrapper = mountLayout({ roles: ['MEMBER'] })
+    const labels = wrapper.findAll('.nav-label').map((n) => n.text())
+
+    expect(labels).not.toContain('커뮤니티')
+    expect(labels).not.toContain('공유 게시판')
+  })
+
+  it('커뮤니티 유저에게는 게시판 하나만 남는다', () => {
+    // 이미지·동영상은 게시판으로 합쳐졌고, 콘텐츠·재생목록은 관리자의
+    // 운영 화면이다.
+    const wrapper = mountLayout({ roles: ['MEMBER', 'COMMUNITY_USER'] })
+    const labels = wrapper.findAll('.nav-label').map((n) => n.text())
+
+    expect(labels).toEqual(['커뮤니티', '공유 게시판'])
   })
 })

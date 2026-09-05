@@ -52,8 +52,10 @@ class Settings(BaseSettings):
     # 읽을 때마다 그 크기만큼 메모리에 올라온다. 운영에서는 서버를 늘릴 때
     # 공유 스토리지(NFS 등)를 이 경로에 붙이면 된다.
     MEDIA_ROOT: str = "media"
-    MAX_IMAGE_BYTES: int = 20 * 1024 * 1024
-    MAX_VIDEO_BYTES: int = 500 * 1024 * 1024
+    MAX_IMAGE_BYTES: int = 200 * 1024 * 1024
+    #: 동영상 상한 10GB. 이 크기부터는 통째로 메모리에 올리면 서버가 먼저
+    #: 쓰러진다 — 업로드는 조각으로 받아 쓴다(``services/assets.store_stream``).
+    MAX_VIDEO_BYTES: int = 10 * 1024 * 1024 * 1024
 
     @property
     def BACKEND_DIR(self) -> str:  # noqa: N802 - 설정 값처럼 쓰이는 경로다

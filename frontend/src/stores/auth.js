@@ -25,12 +25,25 @@ export const ASSIGNABLE_ROLES = [
 ]
 
 /**
- * 커뮤니티 유저에게 열어 두는 화면.
+ * 커뮤니티 유저에게 열어 두는 화면(커뮤니티 서브 메뉴들).
  *
  * **닫는 목록이 아니라 여는 목록**이다 — 화면이 늘 때마다 막을 것을 적으면
  * 언젠가 잊는다. 서버도 같은 방식으로 경로를 가른다(``api/deps.py``).
  */
-export const COMMUNITY_ROUTES = ['boards']
+export const COMMUNITY_ROUTES = ['community-board']
+
+/**
+ * 관리자만 들어가는 커뮤니티 화면.
+ *
+ * 커뮤니티 유저는 자료(글·이미지·동영상)를 올리는 사람이고, 자료를 엮어
+ * 화면에 내보내는 일(콘텐츠·재생목록)은 운영이다. 서버도 같은 규칙으로
+ * 막는다(``_require_manage``).
+ */
+export const COMMUNITY_ADMIN_ROUTES = [
+  'community-playlists',
+  'community-contents',
+  'community-content-editor',
+]
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -71,8 +84,17 @@ export const useAuthStore = defineStore('auth', () => {
     manageDevices: isSuperAdmin.value || isOrgAdmin.value || isDeviceManager.value,
     manageSchedules: isSuperAdmin.value || isOrgAdmin.value || isDeviceManager.value,
     manageBoards: isSuperAdmin.value || isOrgAdmin.value,
-    // 게시판에 글을 올리는 것과 수집원을 손대는 것은 다른 일이다.
-    writePosts: isSuperAdmin.value || isOrgAdmin.value || isCommunityUser.value,
+    // 커뮤니티 공간에 들어올 수 있는가 — 기관관리자와 커뮤니티 역할 보유자만.
+    // (isCommunityUser 가 아니라 역할 보유 여부를 본다. 다른 역할과 겸해도
+    // 커뮤니티에는 들어온다. 서버의 can_use_community 와 같은 규칙.)
+    useCommunity:
+      isSuperAdmin.value || isOrgAdmin.value || roles.value.includes('COMMUNITY_USER'),
+    // 커뮤니티 콘텐츠·재생목록 — 관리자의 운영 화면.
+    manageCommunity: isSuperAdmin.value || isOrgAdmin.value,
+    // 커뮤니티에 올릴 수 있는가. 들어올 수 있으면 올릴 수 있다 — 남의 것은
+    // 조회만 되고 제 것에만 수정·삭제가 열린다. 최종 판정은 서버가 다시 한다.
+    shareInCommunity:
+      isSuperAdmin.value || isOrgAdmin.value || roles.value.includes('COMMUNITY_USER'),
   }))
 
   function hasRole(...names) {

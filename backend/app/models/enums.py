@@ -10,9 +10,6 @@ from enum import StrEnum
 class OrgType(StrEnum):
     ORG = "기관"
     SCHOOL = "학교"
-    #: 기관에 딸린 곳(도서관·문화센터·방과후센터 등). 커뮤니티 유저가
-    #: 소속되는 자리다 — 학교에는 두지 않는다.
-    AFFILIATE = "부설기관"
     ETC = "기타"
 
 

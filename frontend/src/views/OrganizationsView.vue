@@ -76,7 +76,7 @@ const uploadProgress = ref(0)
 const isSchool = computed(() => form.value.org_type === '학교')
 
 // 서버가 저장하는 값은 한국어 코드다. 화면 표시만 번역한다.
-const ORG_TYPES = ['기관', '학교', '부설기관', '기타']
+const ORG_TYPES = ['기관', '학교', '기타']
 const SCHOOL_LEVELS = ['초', '중', '고']
 
 /**
