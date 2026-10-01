@@ -401,12 +401,12 @@ def test_playlist_album_link_follows_edits(client, super_headers, school_id, upl
 
 # ------------------------------------------------------------------ 동영상 상한
 
-# 상한은 10GB 다. 이 크기부터는 통째로 메모리에 올리면 서버가 먼저 쓰러지므로,
-# 업로드는 조각으로 받아 쓰고 상한을 넘는 순간 끊는다.
+# 동영상 상한은 100MB 다(DID 표출용 클립 기준). 업로드는 조각으로 받아 쓰고
+# 상한을 넘는 순간 끊는다 — 통째로 메모리에 올리지 않는다.
 
 
-def test_video_limit_is_10gb():
-    assert asset_service.max_bytes("video") == 10 * 1024 * 1024 * 1024
+def test_video_limit_is_100mb():
+    assert asset_service.max_bytes("video") == 100 * 1024 * 1024
 
 
 def test_oversize_video_is_cut_off(client, super_headers, upload, media_root, monkeypatch):  # noqa: ANN001

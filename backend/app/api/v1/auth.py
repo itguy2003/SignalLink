@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, bad_request
 from app.core.config import settings
+from app.core.passwords import complexity_error
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.enums import Role, UserStatus
 from app.models.organization import Organization
@@ -94,6 +95,8 @@ def register(payload: RegisterRequest, db: DbSession) -> MeResponse:
     ).scalar_one_or_none()
     if duplicated is not None:
         raise bad_request("이미 사용 중인 사용자ID 입니다.")
+    if (reason := complexity_error(payload.password)) is not None:
+        raise bad_request(reason)
 
     user = User(
         user_id=payload.user_id,
@@ -193,6 +196,8 @@ def change_password(
 ) -> Message:
     if not verify_password(payload.current_password, user.password_hash):
         raise bad_request("현재 비밀번호가 올바르지 않습니다.")
+    if (reason := complexity_error(payload.new_password)) is not None:
+        raise bad_request(reason)
     user.password_hash = hash_password(payload.new_password)
     db.commit()
     return Message(detail="비밀번호가 변경되었습니다.")

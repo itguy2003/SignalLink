@@ -20,7 +20,7 @@ from app.models.asset import Asset
 from app.models.organization import Organization
 from app.schemas.asset import AssetOut, AssetUpdate
 from app.schemas.common import Message, Page
-from app.services import assets as asset_service
+from app.services import assets as asset_service, video_transcode
 from app.services import org_tree, permissions
 
 router = APIRouter(prefix="/assets", tags=["자산"])
@@ -109,8 +109,14 @@ async def upload_asset(
         raise forbid("해당 기관에 파일을 올릴 권한이 없습니다.")
 
     # 조각으로 받아 쓴다. 10GB 동영상을 통째로 메모리에 올리면 서버가 쓰러진다.
+    content_type = file.content_type
     try:
-        stored, size = await asset_service.store_stream(file, kind, file.content_type)
+        stored, size = await asset_service.store_stream(file, kind, content_type)
+        if kind == "video":
+            # 웹 표준(H.264/AAC MP4, faststart)으로 정규화 — 장치가 항상 그린다.
+            stored, size, content_type = await video_transcode.ensure_web_video_async(
+                stored, content_type
+            )
     except asset_service.UploadRejected as exc:
         raise bad_request(str(exc)) from exc
 
@@ -119,7 +125,7 @@ async def upload_asset(
         uploaded_by=actor.id,
         kind=kind,
         filename=file.filename or "upload",
-        content_type=file.content_type,
+        content_type=content_type,
         size_bytes=size,
         storage_path=stored,
     )

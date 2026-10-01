@@ -1,0 +1,59 @@
+SignalLink Windows 플레이어 (WPF 키오스크 셸)
+=============================================
+
+무엇인가
+--------
+표출 엔진은 브라우저 플레이어(frontend /player)를 그대로 쓴다 — 스케줄
+수신·암호화 채널(WS)·전환 효과·가득 채우기 렌더링이 이미 거기 구현돼 있고,
+렌더러를 두 벌 유지하면 반드시 어긋난다. 이 앱은 그 페이지를 WebView2 로
+품는 **키오스크 셸**이며, 브라우저가 못 하는 것만 보탠다:
+
+  * 전체화면 + 최상위(Topmost) — 창 틀·작업표시줄 없음, 다른 창이
+    앞으로 오면 도로 올라온다. Alt+F4 무시.
+  * 테스트용 FHD 창 모드 — Ctrl+Shift+F 로 전체화면과 1920x1080 일반 창을
+    오간다. FHD 창에서는 최상위·닫기 봉인·커서 숨김이 꺼져 다른 창과
+    나란히 놓고 시험할 수 있다(보통 창처럼 닫힌다). 마지막 모드는
+    settings.json 에 기억되어 다음 실행에도 유지된다. 운영 배포 전에는
+    Ctrl+Shift+F 로 전체화면으로 되돌려 둘 것.
+  * 화면 꺼짐 방지(SetThreadExecutionState).
+  * 화면 캡처 업로드 — CMS 의 '미리보기(캡처)' 명령이 오면 WebView2 화면을
+    찍어 /api/v1/player/screenshot 으로 올린다(브라우저 플레이어는 무시하는
+    기능). 웹 플레이어가 postMessage 다리로 장치 토큰과 캡처 요청을 셸에
+    넘긴다.
+  * 서버 주소 저장(%AppData%\SignalLinkPlayer\settings.json) 및 자동 재접속
+    (부팅 직후 서버가 늦게 떠도 5초 간격 재시도).
+
+설정(Ctrl+Shift+S)
+------------------
+  * 서버 주소 (필수)
+  * 장치 고유번호 (선택, XXXX-XXX-XXX) — 입력하면 셸이 페이지가 뜨기 전에
+    웹 플레이어의 저장소(localStorage 'signallink.player')에 주입해 곧장
+    그 장치로 표출한다. 비우면 웹 플레이어 화면에서 입력한다.
+  * 마스터 키 — 서버의 DEVICE_MASTER_KEY 와 같은 값 (장치 고유번호를
+    입력할 때 필수).
+설정은 %AppData%\SignalLinkPlayer\settings.json 에 저장된다.
+
+관리 단축키
+-----------
+  Ctrl+Shift+S   설정(서버 주소·장치 고유번호·마스터 키) 열기
+  Ctrl+Shift+F   전체화면(키오스크) ↔ FHD 창(테스트) 전환
+  Ctrl+Shift+Q   종료 (전체화면에서는 이것 말고는 끌 수 없다)
+
+빌드/실행
+---------
+  cd player-wpf
+  dotnet build            # 개발 빌드
+  dotnet run              # 실행
+  dotnet publish -c Release -o publish   # 배포판
+
+실행 요건: Windows + WebView2 런타임(Win11 은 기본 탑재, Win10 은
+Evergreen 런타임 설치). 최초 실행 시 서버 주소를 입력하면
+<서버>/player 로 이동한다 (개발: http://127.0.0.1:5173).
+
+무인 운영 팁
+------------
+  * 시작 프로그램 등록: shell:startup 에 SignalLinkPlayer.exe 바로가기.
+  * 프로세스 감시(비정상 종료 재기동)는 작업 스케줄러 '다시 시작' 옵션 또는
+    NSSM 같은 감시자를 쓸 것.
+  * Alt+Tab/Win 키까지 봉인하려면 OS 수준 키오스크(할당된 액세스, 그룹
+    정책)를 병행할 것 — 앱 혼자서는 셸 키를 다 막을 수 없다.

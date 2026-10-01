@@ -25,8 +25,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.asset import Asset, ContentAsset, PlaylistAsset
-from app.models.community import CommunityPostAsset
-from app.models.community_content import CommunityContent, CommunityContentAsset
 from app.models.content import Content
 from app.models.playlist import Playlist
 from app.services import thumbnails
@@ -47,14 +45,22 @@ VIDEO_TYPES = {
     "video/ogg": ".ogv",
 }
 
-ALLOWED_TYPES: dict[str, str] = {**IMAGE_TYPES, **VIDEO_TYPES}
+#: 서버 변환(ffmpeg)이 있어야만 받는 형식 — 저장 직후 MP4 로 바뀐다
+#: (``services/video_transcode``). 변환기가 없으면 그 단계에서 거절된다.
+TRANSCODE_ONLY_TYPES = {
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv",
+}
+
+ALLOWED_TYPES: dict[str, str] = {**IMAGE_TYPES, **VIDEO_TYPES, **TRANSCODE_ONLY_TYPES}
 
 
 def kind_of(content_type: str) -> str | None:
     """MIME 으로 갈래를 정한다. 모르는 형식이면 None."""
     if content_type in IMAGE_TYPES:
         return "image"
-    if content_type in VIDEO_TYPES:
+    if content_type in VIDEO_TYPES or content_type in TRANSCODE_ONLY_TYPES:
         return "video"
     return None
 
@@ -283,45 +289,24 @@ def sync_playlist_links(db: Session, playlist: Playlist) -> None:
         playlist.asset_links.remove(current[asset_id])
 
 
-def sync_community_links(db: Session, content: CommunityContent) -> None:
-    """커뮤니티 콘텐츠가 쓰는 자산 색인을 문서와 맞춘다. 커밋은 호출자가 한다.
-
-    ``sync_links`` 의 커뮤니티판 — 같은 자리에서 같은 방식으로 부른다.
-    """
-    wanted = referenced_ids(content.document)
-    if wanted:
-        existing = set(db.execute(select(Asset.id).where(Asset.id.in_(wanted))).scalars().all())
-        wanted &= existing
-
-    current = {link.asset_id: link for link in content.asset_links}
-    for asset_id in wanted - current.keys():
-        content.asset_links.append(CommunityContentAsset(asset_id=asset_id))
-    for asset_id in current.keys() - wanted:
-        content.asset_links.remove(current[asset_id])
-
-
 def usage_count(db: Session, asset_id: int) -> int:
     """이 자산을 쓰는 곳의 수. 삭제해도 되는지 판단하는 근거다.
 
-    콘텐츠·재생목록·커뮤니티(공유 자료와 글의 첨부)를 함께 센다. 어느 하나를
-    빼면 그것이 쓰는 파일이 '아무도 안 쓰는 파일' 로 보여, 지운 뒤에야 화면이
-    빈 것을 알게 된다.
+    콘텐츠·재생목록·커뮤니티 재생목록을 함께 센다. 어느 하나를 빼면 그것이
+    쓰는 파일이 '아무도 안 쓰는 파일' 로 보여, 지운 뒤에야 화면이 빈 것을
+    알게 된다.
     """
+    from app.models.community_playlist import CommunityPlaylistAsset
+
     contents = db.execute(
         select(ContentAsset.content_id).where(ContentAsset.asset_id == asset_id)
     ).scalars()
     playlists = db.execute(
         select(PlaylistAsset.playlist_id).where(PlaylistAsset.asset_id == asset_id)
     ).scalars()
-    posts = db.execute(
-        select(CommunityPostAsset.post_id).where(CommunityPostAsset.asset_id == asset_id)
+    community_playlists = db.execute(
+        select(CommunityPlaylistAsset.playlist_id).where(
+            CommunityPlaylistAsset.asset_id == asset_id
+        )
     ).scalars()
-    community_docs = db.execute(
-        select(CommunityContentAsset.content_id).where(CommunityContentAsset.asset_id == asset_id)
-    ).scalars()
-    return (
-        len(set(contents))
-        + len(set(playlists))
-        + len(set(posts))
-        + len(set(community_docs))
-    )
+    return len(set(contents)) + len(set(playlists)) + len(set(community_playlists))

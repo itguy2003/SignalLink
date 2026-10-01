@@ -45,8 +45,8 @@ beforeEach(() => {
 describe('레일 구성', () => {
   it('기본 요소와 위젯을 아이콘으로 세운다', () => {
     const wrapper = mountRail()
-    // 기본 4개(글자·이미지·동영상·웹) + 위젯 3개 + 재생목록 고르기 1개
-    expect(wrapper.findAll('.rail-btn')).toHaveLength(8)
+    // 기본 5개(글자·이미지·동영상·웹·QR코드) + 위젯 3개 + 재생목록 고르기 1개
+    expect(wrapper.findAll('.rail-btn')).toHaveLength(9)
   })
 
   it('이름 대신 아이콘만 보여 준다', () => {
@@ -76,8 +76,8 @@ describe('레일 구성', () => {
 
   it('위젯이 없어도 기본 요소는 나온다', () => {
     const wrapper = mountRail({ widgets: [] })
-    // 기본 4개 + 재생목록 고르기 1개.
-    expect(wrapper.findAll('.rail-btn')).toHaveLength(5)
+    // 기본 5개 + 재생목록 고르기 1개.
+    expect(wrapper.findAll('.rail-btn')).toHaveLength(6)
   })
 
   it('아이콘을 두 개씩 늘어놓는다', () => {

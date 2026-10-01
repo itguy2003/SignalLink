@@ -23,9 +23,16 @@ import { usePreviewStage } from '@/composables/usePreviewStage'
 const props = defineProps({
   document: { type: Object, required: true },
   widgets: { type: Array, default: () => [] },
+  /**
+   * 여러 장짜리(재생목록형) 미리보기. pageTotal 이 2 이상이면 넘김 줄이
+   * 나타나고, ‹ › 는 'page' 이벤트(+1/-1)로 바깥에 알린다 — 어떤 장을
+   * 보여 줄지는 문서를 쥔 쪽이 정한다.
+   */
+  pageIndex: { type: Number, default: 0 },
+  pageTotal: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'page'])
 
 const { t } = useI18n()
 
@@ -87,6 +94,27 @@ defineExpose({ remeasure: measure })
       </div>
 
       <div class="controls">
+        <div v-if="pageTotal > 1" class="pager">
+          <button
+            class="btn btn-sm"
+            :disabled="pageIndex <= 0"
+            :title="t('common.prev')"
+            data-test="page-prev"
+            @click="emit('page', -1)"
+          >
+            ‹
+          </button>
+          <span class="muted page-count">{{ pageIndex + 1 }} / {{ pageTotal }}</span>
+          <button
+            class="btn btn-sm"
+            :disabled="pageIndex >= pageTotal - 1"
+            :title="t('common.next')"
+            data-test="page-next"
+            @click="emit('page', 1)"
+          >
+            ›
+          </button>
+        </div>
         <PreviewSizeControls
           :value="settings.previewSize"
           :size-keys="sizeKeys"
@@ -125,6 +153,18 @@ defineExpose({ remeasure: measure })
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+}
+
+.page-count {
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .stage {

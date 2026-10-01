@@ -13,7 +13,12 @@ import { useI18n } from 'vue-i18n'
 
 import { api } from '@/api/client'
 import { useToastStore } from '@/stores/toast'
-import { writeContentDrag, writePlaylistDrag, writeWidgetDrag } from '@/utils/contentDnd'
+import {
+  writeContentDrag,
+  writeOrgNoticeDrag,
+  writePlaylistDrag,
+  writeWidgetDrag,
+} from '@/utils/contentDnd'
 import { defaultSize, labelKey, toQuery } from '@/utils/orientation'
 
 const props = defineProps({
@@ -36,7 +41,7 @@ const emit = defineEmits(['edit', 'create'])
 const { t } = useI18n()
 const toast = useToastStore()
 
-/** 'content' | 'widget' | 'playlist' */
+/** 'content' | 'widget' | 'playlist' | 'notice' */
 const tab = ref('content')
 
 const items = ref([])
@@ -109,8 +114,32 @@ const visiblePlaylists = computed(() => {
   return playlists.value.filter((p) => p.name.toLowerCase().includes(keyword))
 })
 
+/**
+ * 소속기관 공지 — 자기 것 + 상위기관이 내린 것(for_org). 공지는 **통째로
+ * 참조**로 담는다: 카드를 끌어다 놓으면 스케줄 아이템이 공지 id 를 들고,
+ * 표출 시 서버가 슬라이드 전체로 펼친다.
+ */
+const notices = ref([])
+
+async function loadNotices() {
+  if (!props.orgId) return
+  notices.value = await api.get('/org-notices', { for_org: props.orgId }).catch(() => [])
+}
+
+const visibleNotices = computed(() => {
+  const keyword = query.value.trim().toLowerCase()
+  if (!keyword) return notices.value
+  return notices.value.filter((n) => n.name.toLowerCase().includes(keyword))
+})
+
+function onNoticeDragStart(event, notice) {
+  draggingId.value = `n${notice.id}`
+  writeOrgNoticeDrag(event, notice)
+}
+
 watch(tab, (value) => {
   if (value === 'playlist') loadPlaylists()
+  if (value === 'notice') loadNotices()
 })
 
 onMounted(async () => {
@@ -168,6 +197,15 @@ defineExpose({ reload: load })
       <button class="tab" :class="{ active: tab === 'playlist' }" @click="tab = 'playlist'">
         {{ t('library.tabPlaylist') }}
       </button>
+      <button
+        v-if="props.orgId"
+        class="tab"
+        :class="{ active: tab === 'notice' }"
+        data-test="tab-notice"
+        @click="tab = 'notice'"
+      >
+        {{ t('library.tabNotice') }}
+      </button>
     </div>
 
     <div class="filters">
@@ -200,6 +238,7 @@ defineExpose({ reload: load })
       </template>
       <template v-else-if="tab === 'widget'">{{ t('library.dragWidgetHint') }}</template>
       <template v-else-if="tab === 'playlist'">{{ t('library.dragPlaylistHint') }}</template>
+      <template v-else-if="tab === 'notice'">{{ t('library.dragNoticeHint') }}</template>
       <template v-else>{{ t('library.dragHint') }}</template>
     </p>
 
@@ -286,6 +325,42 @@ defineExpose({ reload: load })
           <div class="meta muted">
             {{ t('widgetPlaylist.itemCount', { count: playlist.items?.length ?? 0 }) }} ·
             {{ t('widgetPlaylist.duration', { sec: playlist.total_duration_sec ?? 0 }) }}
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- 공지 탭: 카드를 끌어다 놓으면 공지 전체가 참조로 담긴다. -->
+    <div v-if="tab === 'notice'" class="list">
+      <p v-if="notices.length === 0" class="muted pad">{{ t('orgNotice.empty') }}</p>
+      <p v-else-if="visibleNotices.length === 0" class="muted pad">
+        {{ t('org.searchNoMatch') }}
+      </p>
+
+      <article
+        v-for="notice in visibleNotices"
+        v-else
+        :key="notice.id"
+        class="card-item"
+        :class="{ dragging: draggingId === `n${notice.id}` }"
+        draggable="true"
+        data-test="notice-item"
+        :title="notice.name"
+        @dragstart="onNoticeDragStart($event, notice)"
+        @dragend="onDragEnd"
+      >
+        <span class="thumb widget-thumb">📢</span>
+        <div class="info">
+          <div class="name">
+            {{ notice.name }}
+            <span v-if="notice.org_name" class="badge badge-muted">{{ notice.org_name }}</span>
+          </div>
+          <div class="meta muted">
+            {{ t('orgNotice.itemCount', { count: notice.item_count ?? 0 }) }}
+            <template v-if="notice.start_date || notice.end_date">
+              · {{ (notice.start_date ?? '').replace('T', ' ') }} ~
+              {{ (notice.end_date ?? '').replace('T', ' ') }}
+            </template>
           </div>
         </div>
       </article>
@@ -459,5 +534,21 @@ defineExpose({ reload: load })
 .wide {
   width: 100%;
   justify-content: center;
+}
+
+/* 공지 슬라이드 — 한 단 들여 공지에 딸린 것임을 보인다. */
+.slides {
+  margin: 2px 0 6px 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.slide-thumb {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 </style>

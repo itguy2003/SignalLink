@@ -8,7 +8,8 @@ export const useToastStore = defineStore('toast', () => {
 
   function push(message, type = 'info', timeout = 4000) {
     const id = ++counter
-    items.value.push({ id, message, type })
+    // timeout 을 함께 실어 화면이 사라짐 애니메이션을 수명과 맞출 수 있게 한다.
+    items.value.push({ id, message, type, timeout })
     setTimeout(() => dismiss(id), timeout)
     return id
   }

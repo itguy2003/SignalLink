@@ -153,8 +153,10 @@ export function createSeed() {
       // 세로 콘텐츠(3)를 쓰고, 이 스케줄이 배정된 장치도 세로 키오스크다.
       orientation: 'PORTRAIT',
       // 행사 기간에만 나가는 스케줄. 기간이 지나면 배정돼 있어도 표출되지 않는다.
-      start_at: '2026-10-01T00:00:00Z',
-      end_at: '2026-10-31T23:59:59Z',
+      // '지금은 기간 밖' 전제를 테스트가 쓰므로, 달력이 지나도 썩지 않게
+      // 언제나 미래가 되는 상대 날짜로 만든다.
+      start_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      end_at: new Date(Date.now() + 60 * 86_400_000).toISOString(),
       org_id: 3,
       created_by: 3,
       version: 1,

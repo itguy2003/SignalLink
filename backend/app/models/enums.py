@@ -44,9 +44,6 @@ class Role(StrEnum):
     DEVICE_MANAGER = "DEVICE_MANAGER"
     HOMEROOM_TEACHER = "HOMEROOM_TEACHER"
     MEMBER = "MEMBER"
-    #: 기관 바깥에서 게시판만 쓰는 사람(학부모·지역 주민 등). 관리 화면에는
-    #: 들어오지 못하고, 소속 기관 게시판을 읽고 글을 올릴 수 있다.
-    COMMUNITY_USER = "COMMUNITY_USER"
 
 
 #: 역할 서열. 상위 역할이 하위 역할의 권한을 포함하지는 않지만,
@@ -57,7 +54,6 @@ ROLE_RANK: dict[Role, int] = {
     Role.DEVICE_MANAGER: 60,
     Role.HOMEROOM_TEACHER: 40,
     Role.MEMBER: 10,
-    Role.COMMUNITY_USER: 5,
 }
 
 

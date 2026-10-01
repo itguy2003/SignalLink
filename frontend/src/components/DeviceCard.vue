@@ -11,7 +11,6 @@
 import { useI18n } from 'vue-i18n'
 
 import DeviceScreenThumb from '@/components/DeviceScreenThumb.vue'
-import SchedulePicker from '@/components/SchedulePicker.vue'
 import { useDeviceCommands } from '@/composables/useDeviceCommands'
 
 const props = defineProps({
@@ -34,7 +33,7 @@ const emit = defineEmits([
   'edit',
   'delegate',
   'remove',
-  'assign',
+  'edit-schedules',
   'command',
   'refresh',
 ])
@@ -105,12 +104,27 @@ function formatTime(value) {
         <dt>{{ t('device.schedule') }}</dt>
         <dd>
           <!-- 한 장치에 여러 스케줄을 걸 수 있고 순서가 곧 우선순위다. -->
-          <SchedulePicker
-            :assigned="device.schedules ?? []"
-            :schedules="schedules"
-            :disabled="!canManage"
-            @change="emit('assign', { device, scheduleIds: $event })"
-          />
+          <div class="schedule-cell">
+            <p v-if="!(device.schedules ?? []).length" class="muted schedule-empty">
+              {{ t('device.demoOption') }}
+            </p>
+            <ol v-else class="schedule-summary">
+              <li v-for="(schedule, index) in device.schedules" :key="schedule.id">
+                {{ index + 1 }}. {{ schedule.name }}
+                <span v-if="!schedule.active" class="badge badge-muted">
+                  {{ t('schedule.inactive') }}
+                </span>
+              </li>
+            </ol>
+            <button
+              v-if="canManage"
+              class="btn btn-sm"
+              data-test="edit-schedules"
+              @click="emit('edit-schedules', device)"
+            >
+              {{ t('device.manageSchedules') }}
+            </button>
+          </div>
         </dd>
       </div>
     </dl>
@@ -281,5 +295,19 @@ function formatTime(value) {
 
 .manage .btn {
   flex: 1;
+}
+
+.schedule-empty {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.schedule-summary {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  font-size: 12px;
+  display: grid;
+  gap: 2px;
 }
 </style>

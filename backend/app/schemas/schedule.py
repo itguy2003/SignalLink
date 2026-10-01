@@ -6,6 +6,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import PanelType, ScheduleKind
+from app.services import transitions as fx
+from app.services.transitions import DEFAULT_TRANSITION, TransitionKind
 
 
 class ScheduleItemBase(BaseModel):
@@ -15,8 +17,17 @@ class ScheduleItemBase(BaseModel):
     end_time: time | None = None
     sort_order: int = 0
     duration_sec: int = Field(default=10, ge=1, le=86400)
+    #: 앞 칸에서 이 칸으로 넘어올 때의 전환 — 재생목록 칸과 같은 규약.
+    transition: TransitionKind = DEFAULT_TRANSITION
+    transition_ms: int = Field(
+        default=fx.DEFAULT_TRANSITION_MS,
+        ge=fx.MIN_TRANSITION_MS,
+        le=fx.MAX_TRANSITION_MS,
+    )
     #: 콘텐츠 라이브러리 참조. 지정하면 표출 시 ``content`` 대신 이쪽이 쓰인다.
     content_id: int | None = None
+    #: 소속기관 공지 참조. 지정하면 표출 시 공지의 슬라이드 전체로 펼쳐진다.
+    org_notice_id: int | None = None
     #: 인라인 콘텐츠. ``content_id`` 가 없을 때 사용한다.
     content: dict[str, Any] = Field(default_factory=dict)
 
@@ -24,6 +35,13 @@ class ScheduleItemBase(BaseModel):
     def _check_time_range(self) -> ScheduleItemBase:
         if self.start_time and self.end_time and self.start_time >= self.end_time:
             raise ValueError("종료시간은 시작시간보다 뒤여야 합니다.")
+        return self
+
+    @model_validator(mode="after")
+    def _check_transition_fits(self) -> ScheduleItemBase:
+        # 3초 머무는 칸에 5초짜리 전환을 걸면 효과가 끝나기 전에 넘어간다.
+        if not fx.fits_in(self.transition, self.transition_ms, self.duration_sec):
+            raise ValueError("전환 시간은 표출 시간보다 길 수 없습니다.")
         return self
 
 

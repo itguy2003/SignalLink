@@ -165,15 +165,14 @@ def test_profile_update_cannot_touch_roles_or_org(client, super_headers, root_or
     assert body["org_id"] == before["org_id"]
 
 
-def test_community_user_can_update_their_profile(client, make_user, login, super_headers, root_org_id):  # noqa: ANN001
-    from app.models.enums import Role
+def test_member_can_update_their_profile(client, make_user, login, super_headers, root_org_id):  # noqa: ANN001
 
     office = client.post(
         "/api/v1/organizations",
         headers=super_headers,
         json={"name": "가나교육청", "parent_id": root_org_id, "org_type": "기관"},
     ).json()["id"]
-    make_user("resident9", org_id=office, roles=[Role.COMMUNITY_USER])
+    make_user("resident9", org_id=office, roles=[])
     headers = login("resident9")
 
     response = client.put("/api/v1/auth/me", headers=headers, json={"name": "주민 아홉"})
@@ -212,3 +211,88 @@ def test_change_password_requires_the_current_one(client, make_user, login, root
         "/api/v1/auth/login", json={"user_id": "changer", "password": "newpass1234"}
     )
     assert relogin.status_code == 200
+
+
+# ------------------------------------------------------------------ 비밀번호 복잡도
+
+# 배포(운영)에서만 강제한다. 개발 SQLite 기본에서는 꺼져 있어
+# 시연 계정(test1234)이 그대로 돈다.
+
+
+def _register(client, org_id, user_id, password):  # noqa: ANN001
+    return client.post(
+        '/api/v1/auth/register',
+        json={
+            'org_id': org_id, 'user_id': user_id, 'password': password,
+            'password_confirm': password, 'name': '복잡도 검사',
+        },
+    )
+
+
+def test_complexity_off_by_default_in_dev(client, root_org_id):  # noqa: ANN001
+    assert _register(client, root_org_id, 'weakpass1', 'aaaaaaaa').status_code == 201
+
+
+def test_complexity_enforced_when_on(client, root_org_id, monkeypatch):  # noqa: ANN001
+    from app.core import passwords
+    monkeypatch.setattr(passwords.settings, 'PASSWORD_COMPLEXITY', 'on')
+
+    weak = _register(client, root_org_id, 'weakpass2', 'aaaaaaaa')
+    assert weak.status_code == 400
+    assert '특수문자' in weak.json()['detail']
+
+    # 영문·숫자·특수문자를 모두 갖추면 통과한다.
+    assert _register(client, root_org_id, 'strongpass', 'Abcd123!').status_code == 201
+
+
+def test_change_password_checks_complexity(client, root_org_id, monkeypatch, make_user, login):  # noqa: ANN001
+    from app.core import passwords
+    make_user('pwuser', org_id=root_org_id, roles=[])
+    headers = login('pwuser')
+    monkeypatch.setattr(passwords.settings, 'PASSWORD_COMPLEXITY', 'on')
+
+    weak = client.post(
+        '/api/v1/auth/change-password',
+        headers=headers,
+        # 영문+숫자는 스키마가 이미 요구한다 — 특수문자 누락으로 복잡도에 걸리게 한다.
+        json={'current_password': 'test1234', 'new_password': 'abcd1234x', 'new_password_confirm': 'abcd1234x'},
+    )
+    assert weak.status_code == 400
+
+    ok = client.post(
+        '/api/v1/auth/change-password',
+        headers=headers,
+        json={'current_password': 'test1234', 'new_password': 'Abcd123!', 'new_password_confirm': 'Abcd123!'},
+    )
+    assert ok.status_code == 200
+
+
+# ---------------------------------------------------------------- 커뮤니티 가입
+
+
+def test_public_org_list_filters_by_category(client, super_headers, root_org_id):
+    """가입 화면의 기관 목록 — category=기관 이면 학교가 보이지 않는다."""
+    office = client.post(
+        "/api/v1/organizations",
+        headers=super_headers,
+        json={"name": "보람교육청", "parent_id": root_org_id, "org_type": "기관"},
+    ).json()["id"]
+    client.post(
+        "/api/v1/organizations",
+        headers=super_headers,
+        json={
+            "name": "보람초등학교",
+            "parent_id": office,
+            "org_type": "학교",
+            "school_level": "초",
+        },
+    )
+
+    names = [
+        o["name"]
+        for o in client.get(
+            "/api/v1/organizations/public", params={"q": "보람", "category": "기관"}
+        ).json()
+    ]
+    assert "보람교육청" in names
+    assert "보람초등학교" not in names

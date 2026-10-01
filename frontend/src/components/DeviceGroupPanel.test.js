@@ -182,11 +182,11 @@ describe('장치 조작 전달', () => {
     expect(wrapper.emitted('command')[0][0].command).toBe('restart')
   })
 
-  it('스케줄 배정을 위로 넘긴다', async () => {
+  it('스케줄 배정 창 열기를 위로 넘긴다', async () => {
+    // 분할 배정 창(DeviceScheduleDialog)은 장치 관리 화면이 띄운다.
     const wrapper = await mountPanel()
-    // 후보 스케줄을 골라 배정하면 부모로 올라간다.
-    await wrapper.find('.device-card .schedule-picker select').setValue(1)
-    expect(wrapper.emitted('assign')[0][0].scheduleIds).toEqual([1])
+    await wrapper.find('.device-card [data-test="edit-schedules"]').trigger('click')
+    expect(wrapper.emitted('edit-schedules')[0][0].id).toBeDefined()
   })
 })
 

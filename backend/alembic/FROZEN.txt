@@ -1,0 +1,23 @@
+Alembic 동결 안내
+=================
+
+이 마이그레이션 체인은 d491ad229086 (community post contact) 을 마지막으로
+동결되었다. 스키마의 주인은 이제 backend-dotnet 의 EF Core 마이그레이션이다
+(backend-dotnet/Migrations/, 첫 마이그레이션 20260907025044_InitialCreate 가
+d491ad229086 시점의 스키마와 동일하다).
+
+앞으로의 규칙
+-------------
+- 스키마 변경: backend-dotnet/Data/AppDbContext.cs 모델을 고치고
+  `dotnet ef migrations add <이름>` 으로 마이그레이션을 만든다.
+  서버 기동 시(DbStartup) 자동 적용된다.
+- 여기(alembic/)에 새 revision 을 추가하지 말 것. 두 도구가 같은 스키마를
+  굴리면 서로의 마이그레이션을 밟는다.
+- Alembic 시절 DB 는 .NET 서버가 처음 기동할 때 자동으로 베이스라인 처리된다
+  (데이터 보존, __EFMigrationsHistory 에 InitialCreate 기록만 추가).
+- FastAPI 의 SQLAlchemy 모델(app/models/*)은 같은 DB 를 읽는 거울이므로,
+  EF 쪽에서 컬럼을 더하면 함께 고친다.
+
+이 디렉터리를 남겨 두는 이유: 과거 이력 참조용이며, d491ad229086 이전
+버전에 머문 DB 를 그 시점까지 끌어올릴 때(`alembic upgrade head`) 여전히
+쓸 수 있다. 그 뒤는 .NET 서버 기동이 이어받는다.

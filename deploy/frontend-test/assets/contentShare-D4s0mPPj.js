@@ -1,0 +1,1 @@
+const t=["없음","동일기관","소속기관","전체"],n={없음:"content.shareNone",동일기관:"content.shareSameOrg",소속기관:"content.shareSiblings",전체:"content.shareAll"};function s(e){return n[e]??"content.shareNone"}export{t as S,s};

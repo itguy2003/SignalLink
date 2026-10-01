@@ -87,22 +87,40 @@ def _bump_referencing(db: DbSession, playlist_id: int) -> list[tuple[int, str, i
         .scalars()
         .all()
     )
-    if not content_ids:
-        return []
 
     for content in db.execute(select(Content).where(Content.id.in_(content_ids))).scalars().all():
         content.version += 1
 
-    schedules = list(
-        db.execute(
-            select(Schedule)
-            .join(ScheduleItem, ScheduleItem.schedule_id == Schedule.id)
-            .where(ScheduleItem.content_id.in_(content_ids))
+    # 스케줄 아이템이 재생목록을 **인라인 문서**로 직접 들 수도 있다(라이브러리
+    # 콘텐츠 없이 스케줄에 놓은 경우). 색인이 없으므로 문서를 훑는다 —
+    # 여기서 빼먹으면 그 스케줄의 장치는 고친 재생목록을 영영 받지 못한다.
+    from app.services.playlists import referenced_ids as _playlist_refs
+
+    inline_schedule_ids = {
+        item.schedule_id
+        for item in db.execute(
+            select(ScheduleItem).where(ScheduleItem.content_id.is_(None))
+        ).scalars()
+        if playlist_id in _playlist_refs(item.content)
+    }
+
+    if not content_ids and not inline_schedule_ids:
+        return []
+
+    stmt = select(Schedule)
+    if content_ids:
+        stmt = (
+            stmt.join(ScheduleItem, ScheduleItem.schedule_id == Schedule.id)
+            .where(
+                (ScheduleItem.content_id.in_(content_ids))
+                | (Schedule.id.in_(inline_schedule_ids))
+            )
             .distinct()
         )
-        .scalars()
-        .all()
-    )
+    else:
+        stmt = stmt.where(Schedule.id.in_(inline_schedule_ids))
+
+    schedules = list(db.execute(stmt).scalars().all())
     targets: list[tuple[int, str, int]] = []
     for schedule in schedules:
         schedule.version += 1

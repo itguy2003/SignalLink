@@ -22,6 +22,7 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import WidgetOptions from '@/components/WidgetOptions.vue'
 import InfoBar from '@/components/InfoBar.vue'
 import PlaylistCycle from '@/components/PlaylistCycle.vue'
+import QrElement from '@/components/QrElement.vue'
 import WidgetPreview from '@/components/WidgetPreview.vue'
 import WidgetRail from '@/components/WidgetRail.vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -80,16 +81,15 @@ const props = defineProps({
   document: { type: Object, required: true },
   widgets: { type: Array, default: () => [] },
   readonly: { type: Boolean, default: false },
-  /**
-   * 커뮤니티 콘텐츠 편집기인가. 레일은 기본 요소만 서고, 이미지·동영상
-   * 고르기 창이 공유물/라이브러리/링크 구성으로 바뀐다. 위젯·재생목록을
-   * 막는 최종 판정은 서버가 한다(커뮤니티 문서 검증).
-   */
-  communityMode: { type: Boolean, default: false },
   /** 원본 크기보다 크게 볼 수 있는 한도. 작은 콘텐츠도 화면을 채우게 한다. */
   maxScale: { type: Number, default: 2 },
   /** 이 콘텐츠가 속한 기관. 편집기에서 재생목록을 새로 만들 때 쓴다. */
   orgId: { type: Number, default: null },
+  /**
+   * 이미지·동영상 고르기의 자산 출처 — `{ list(kind), upload(file, onProgress) }`.
+   * 비우면 기관 자산 라이브러리(/assets). 커뮤니티 게시물은 제 파일만 쓴다.
+   */
+  mediaSource: { type: Object, default: null },
 })
 
 const emit = defineEmits(['change', 'notice'])
@@ -397,7 +397,7 @@ function unbindSelected() {
 function addElement(type, widgetKey = null, at = null) {
   if (props.readonly) return
   const spec = widgetKey ? props.widgets.find((w) => w.key === widgetKey) : null
-  const size = spec?.default_size ?? { w: 600, h: 400 }
+  const size = spec?.default_size ?? (type === 'qrcode' ? { w: 400, h: 400 } : { w: 600, h: 400 })
 
   const centerX = at ? at.x : layout.value.width / 2
   const centerY = at ? at.y : layout.value.height / 2
@@ -425,7 +425,9 @@ function addElement(type, widgetKey = null, at = null) {
             align: 'center',
             bold: false,
           }
-        : {},
+        : type === 'qrcode'
+          ? { text: '', foreground: '#000000', background: '#ffffff' }
+          : {},
     src: null,
   }
 
@@ -1067,7 +1069,6 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
       v-if="!readonly"
       :widgets="widgets"
       :target-region="targetRegion"
-      :basic-only="communityMode"
       @add="addFromRail"
     />
 
@@ -1170,6 +1171,13 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
             >
               {{ element.options.text }}
             </div>
+
+            <QrElement
+              v-else-if="element.type === 'qrcode'"
+              :text="element.options.text"
+              :foreground="element.options.foreground"
+              :background="element.options.background"
+            />
 
             <img
               v-else-if="element.type === 'image' && element.src"
@@ -1612,6 +1620,41 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
               </div>
             </div>
 
+            <template v-if="selected.type === 'qrcode'">
+              <div class="field">
+                <label>{{ t('canvas.qrText') }}</label>
+                <!-- 주소가 길다 — 여러 줄로 받는다. -->
+                <textarea
+                  v-model="selected.options.text"
+                  class="textarea"
+                  rows="3"
+                  :placeholder="t('canvas.qrPlaceholder')"
+                  @input="touch"
+                />
+              </div>
+              <div class="grid-2">
+                <div class="field">
+                  <label>{{ t('canvas.qrForeground') }}</label>
+                  <input
+                    v-model="selected.options.foreground"
+                    class="input"
+                    type="color"
+                    @change="touch"
+                  />
+                </div>
+                <div class="field">
+                  <label>{{ t('canvas.qrBackground') }}</label>
+                  <input
+                    v-model="selected.options.background"
+                    class="input"
+                    type="color"
+                    @change="touch"
+                  />
+                </div>
+              </div>
+              <p class="hint">{{ t('canvas.qrHint') }}</p>
+            </template>
+
             <template v-if="selected.type === 'text'">
               <div class="field">
                 <label>{{ t('canvas.text') }}</label>
@@ -1984,9 +2027,9 @@ defineExpose({ setOrientation, applySplit, fillRegion, resetWeights, fitToScreen
       v-if="mediaPickerOpen"
       :kind="mediaKind"
       :org-id="orgId"
+      :source="mediaSource"
       :current="mediaMode === 'replace' ? (selected?.src ?? '') : ''"
       :orientation="ofSize(layout.width, layout.height)"
-      :variant="communityMode ? 'community' : 'default'"
       @close="mediaPickerOpen = false; clearPendingDrop()"
       @select="chooseMedia"
     />

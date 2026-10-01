@@ -1,0 +1,83 @@
+SignalLink Android/iOS 플레이어 (Flutter 키오스크 셸)
+=====================================================
+
+무엇인가
+--------
+표출 엔진은 브라우저 플레이어(frontend /player)를 그대로 쓴다 — 스케줄
+수신·암호화 채널(WS)·전환 효과·QR·커뮤니티 위젯 렌더링이 이미 거기 구현돼
+있고, 렌더러를 두 벌 유지하면 반드시 어긋난다. 이 앱은 그 페이지를
+WebView(flutter_inappwebview)로 품는 **키오스크 셸**이며, WPF 셸
+(player-wpf)과 같은 계약으로 브라우저가 못 하는 것만 보탠다:
+
+  * 소리 있는 자동재생 허용 — mediaPlaybackRequiresUserGesture=false.
+    WPF 셸의 --autoplay-policy=no-user-gesture-required 와 같은 역할이라
+    사용자 조작 없이도 동영상 소리가 나온다.
+  * 설정 저장(shared_preferences) 및 장치 값 주입 — 장치 고유번호·마스터
+    키를 입력해 두면 문서 시작 스크립트로 웹 플레이어의 localStorage
+    ('signallink.player')에 주입해 곧장 그 장치로 표출한다.
+  * window.chrome.webview.postMessage 다리 shim — 웹 플레이어는 WPF
+    (WebView2) 통로에만 말하므로, 같은 이름의 통로를 문서 시작 시점에
+    심어 웹 쪽 수정 없이 provisioned/screenshot 메시지를 받는다.
+  * 화면 캡처 업로드 — CMS 의 '미리보기(캡처)' 명령이 오면 WebView 화면을
+    찍어 /api/v1/player/screenshot 으로 올린다.
+  * 접속 실패 시 5초 간격 재시도 — 부팅 직후 서버가 늦게 떠도 검은
+    화면으로 멈추지 않는다.
+  * 화면 꺼짐 방지(wakelock) + 가로 고정 + 몰입 전체화면(상태바·내비게이션
+    바 숨김) + 뒤로가기 봉인.
+
+관리 조작 (터치 장치라 단축키 대신)
+-----------------------------------
+  왼쪽 위 모서리를 3초 안에 다섯 번 탭  →  설정 열기
+  설정 화면의 '앱 종료'                  →  종료 (뒤로가기로는 못 끈다)
+
+설정 항목은 WPF 셸과 같다: 서버 주소(필수), 장치 고유번호(선택,
+XXXX-XXX-XXX — 비우면 표출 화면에서 입력), 마스터 키(서버의
+DEVICE_MASTER_KEY, 장치 고유번호 입력 시 필수).
+
+빌드 준비 (최초 1회)
+--------------------
+안드로이드 플랫폼 셸(android/)은 저장소에 포함돼 있고 아래 수정이 이미
+적용된 상태다 — flutter create 를 다시 돌릴 필요 없다:
+
+  * AndroidManifest.xml: INTERNET 권한(서버 접속·WS·캡처 업로드에 필수,
+    release 매니페스트에는 기본으로 없다) + usesCleartextTraffic="true"
+    (개발 http 서버용 — 운영을 https 로만 붙일 거면 빼도 된다)
+    + 앱 이름 'SignalLink 플레이어'.
+  * settings.gradle.kts: AGP 를 8.13.0 으로 고정 — AGP 9 는
+    flutter_inappwebview_android 1.1.3 이 쓰는
+    getDefaultProguardFile('proguard-android.txt') 를 거부해 빌드가 깨진다.
+    플러그인이 AGP 9 를 지원하면 올릴 것.
+  * gradle.properties: kotlin.incremental=false — Windows 에서 Kotlin 증분
+    캐시 파일 잠금으로 빌드가 간헐 실패해서 꺼 뒀다.
+
+필요한 것: Flutter SDK + Android SDK(platform-tools, platforms;android-36,
+build-tools;36.0.0) + JDK 17~21. Android Studio 없이 커맨드라인 도구만으로도
+된다 (sdkmanager --licenses 로 라이선스 동의 후 위 패키지 설치, 그 뒤
+flutter config --android-sdk <경로> --jdk-dir <JDK경로>).
+
+iOS 는 셸이 아직 없다 — macOS 에서 생성한다:
+  flutter create --platforms=ios --org kr.signallink --project-name signallink_player .
+개발 http 서버 접속 시 ios/Runner/Info.plist 에 ATS 예외:
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+
+빌드/실행/검증
+--------------
+  flutter pub get
+  flutter analyze                  # 정적 분석
+  flutter test                     # 설정 검증·설정 화면 테스트 (장치 불필요)
+  flutter run                      # 연결된 장치/에뮬레이터에서 실행
+  flutter build apk --release      # 배포판 → build/app/outputs/flutter-apk/
+
+최초 실행 시 설정 화면이 뜬다. 서버 주소를 입력하면 <서버>/player 로
+이동한다 (개발: PC 의 LAN 주소로 http://<PC-IP>:5173 — 에뮬레이터는
+호스트가 10.0.2.2).
+
+무인 운영 팁
+------------
+  * 부팅 자동 시작·앱 고정은 OS/런처 수준에서: 안드로이드 '화면 고정',
+    전용 키오스크 런처, 또는 MDM 의 전용 장치(kiosk) 모드를 병행할 것 —
+    앱 혼자서는 홈·최근앱 키를 다 막을 수 없다.
+  * 소리는 장치의 **미디어 볼륨**을 따른다 — 무음이면 자동재생이 허용돼도
+    소리가 없다.
+  * 웹 플레이어 갱신은 서버 배포만으로 반영된다(셸은 페이지를 품기만 한다).

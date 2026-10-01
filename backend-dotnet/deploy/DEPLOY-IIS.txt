@@ -1,0 +1,95 @@
+SignalLink Green — IIS 배포 절차 (.NET 기준 백엔드)
+=====================================================
+
+구성: 사이트 두 개.
+  - SignalLinkApi : C:\inetpub\SignalLink\backend  (ANCM in-process, 바인딩 http://127.0.0.1:8016)
+  - SignalLink    : C:\inetpub\SignalLink\frontend (정적 dist + /api 프록시, 바인딩 80/443)
+프런트 사이트가 /api 를 API 로 프록시하므로 한 도메인 = CORS 불필요,
+HTTPS 를 걸면 장치 WebSocket 도 자동으로 wss 가 된다.
+
+0. 서버 구성 요소 (1회, 관리자 권한)
+------------------------------------
+  # 이 서버에서 확인된 미설치 항목 3가지:
+  1) .NET Hosting Bundle (ASP.NET Core Module V2 포함)
+     https://dotnet.microsoft.com/download/dotnet/10.0 → "Hosting Bundle"
+     설치 후:  iisreset
+  2) IIS WebSocket 프로토콜 (장치 제어 채널)
+     dism /online /enable-feature /featurename:IIS-WebSockets /all
+  3) URL Rewrite + ARR (프런트 사이트의 /api 프록시용)
+     https://www.iis.net/downloads/microsoft/url-rewrite
+     https://www.iis.net/downloads/microsoft/application-request-routing
+     설치 후 IIS 관리자 → 서버 노드 → Application Request Routing Cache →
+     Server Proxy Settings → "Enable proxy" 체크, Response buffering 해제.
+  * 동영상 썸네일을 쓰려면 ffmpeg 를 시스템 PATH 에.
+
+1. 산출물 준비
+--------------
+  cd D:\SignalLink\backend-dotnet
+  dotnet publish -c Release -o C:\inetpub\SignalLink\backend
+
+  cd D:\SignalLink\frontend
+  npm run build            (주의: build:test 아님 - 그건 목업 빌드)
+  robocopy dist C:\inetpub\SignalLink\frontend /MIR
+
+2. 설정 파일과 폴더 (관리자 PowerShell)
+---------------------------------------
+  # dotnet publish 가 만든 web.config 를 이 저장소의 것으로 교체한다.
+  Copy-Item D:\SignalLink\backend-dotnet\deploy\web.config `
+            C:\inetpub\SignalLink\backend\web.config -Force
+  Copy-Item D:\SignalLink\backend-dotnet\deploy\frontend-web.config `
+            C:\inetpub\SignalLink\frontend\web.config -Force
+
+  New-Item -ItemType Directory -Force C:\inetpub\SignalLink\media,
+           C:\inetpub\SignalLink\data, C:\inetpub\SignalLink\backend\logs
+  icacls C:\inetpub\SignalLink\media        /grant "IIS_IUSRS:(OI)(CI)M"
+  icacls C:\inetpub\SignalLink\data         /grant "IIS_IUSRS:(OI)(CI)M"
+  icacls C:\inetpub\SignalLink\backend\logs /grant "IIS_IUSRS:(OI)(CI)M"
+
+  그리고 backend\web.config 안의 CHANGE-ME 값 3개를 반드시 바꾼다:
+    SecretKey / DeviceMasterKey / BootstrapAdminPassword
+  DB: 운영은 DatabaseUrl(PostgreSQL) 주석을 풀고, 시험 가동은 SqlitePath 그대로.
+  MediaRoot 는 반드시 지정한다(기본값은 개발 폴더 기준이라 배포에선 틀린 경로).
+
+3. IIS 사이트 만들기 (관리자 cmd)
+---------------------------------
+  set APPCMD=%windir%\system32\inetsrv\appcmd
+
+  %APPCMD% add apppool /name:SignalLinkApi /managedRuntimeVersion: /startMode:AlwaysRunning
+  %APPCMD% set config -section:applicationPools ^
+      "/[name='SignalLinkApi'].processModel.idleTimeout:00:00:00"
+  %APPCMD% add site /name:SignalLinkApi /physicalPath:C:\inetpub\SignalLink\backend ^
+      /bindings:http/127.0.0.1:8016:
+  %APPCMD% set app "SignalLinkApi/" /applicationPool:SignalLinkApi
+  %APPCMD% set site SignalLinkApi /applicationDefaults.preloadEnabled:true
+
+  %APPCMD% add apppool /name:SignalLink /managedRuntimeVersion:
+  %APPCMD% add site /name:SignalLink /physicalPath:C:\inetpub\SignalLink\frontend ^
+      /bindings:http/*:80:
+  %APPCMD% set app "SignalLink/" /applicationPool:SignalLink
+
+  운영에서는 SignalLink 사이트에 443 바인딩 + 인증서를 추가한다.
+
+  * API 앱 풀 필수 설정: 관리 코드 없음(managedRuntimeVersion 빈 값),
+    Idle Time-out 0, AlwaysRunning + Preload - 하트비트/WS 서버가 유휴
+    종료되면 안 된다. 앱 풀 재활용(기본 29시간 주기)은 새벽 고정 시각으로.
+
+4. 첫 기동과 점검
+-----------------
+  - 첫 요청 시 DbStartup 이 EF 마이그레이션 적용 + 최상위 기관/admin 생성.
+    (기존 Alembic DB 를 옮겨 왔다면 자동 베이스라인 - 데이터 보존.)
+  - http://127.0.0.1:8016/api/v1/health → {"status":"ok","backend":"dotnet"}
+  - http://서버/                        → CMS 로그인 화면
+  - http://서버/api/v1/health           → 프록시 경유 확인
+  - admin 로그인 → 곧바로 비밀번호 변경
+  - 이미지 업로드(썸네일), 장치 시뮬레이터 WS 접속(wss) 확인
+  - 500.19 → web.config 구조 오류(aspNetCore 는 system.webServer 안에!)
+    500.30/31 → Hosting Bundle 미설치 또는 backend\logs\stdout*.log 확인
+  - 안정화 후 web.config 의 stdoutLogEnabled 를 false 로.
+
+5. 갱신 배포
+------------
+  %APPCMD% stop site SignalLinkApi
+  dotnet publish -c Release -o C:\inetpub\SignalLink\backend   (web.config 는 -Force 복사 금지: 비밀키가 든 운영본 유지)
+  %APPCMD% start site SignalLinkApi
+  프런트는 npm run build 후 robocopy /MIR 만 하면 된다(사이트 중지 불필요).
+  스키마 변경이 있으면 새 마이그레이션이 기동 시 자동 적용된다.

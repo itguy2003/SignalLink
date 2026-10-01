@@ -37,8 +37,15 @@ class Organization(Base, TimestampMixin):
     longitude: Mapped[float | None] = mapped_column(Float)
     #: 시도교육청코드 (학교 일괄등록 API 연동 키)
     edu_office_code: Mapped[str | None] = mapped_column(String(20), index=True)
-    #: 학교코드 (표준학교코드)
+    #: 학교코드 (표준학교코드 = 나이스 행정코드)
     school_code: Mapped[str | None] = mapped_column(String(20), index=True)
+    # 학교 정보 일괄 등록(나이스 표준 헤더)에서 수집하는 부가 정보.
+    edu_office_name: Mapped[str | None] = mapped_column(String(40))
+    sido_name: Mapped[str | None] = mapped_column(String(20))
+    jurisdiction_name: Mapped[str | None] = mapped_column(String(100))
+    address_detail: Mapped[str | None] = mapped_column(String(300))
+    phone: Mapped[str | None] = mapped_column(String(30))
+    homepage: Mapped[str | None] = mapped_column(String(300))
 
     parent: Mapped[Organization | None] = relationship(
         remote_side="Organization.id", back_populates="children"

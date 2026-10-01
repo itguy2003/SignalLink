@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Windows DID 플레이어 셸.
+
+       표출 엔진은 브라우저 플레이어(frontend /player)를 그대로 쓴다 - 스케줄
+       수신·암호화 채널·전환 효과가 이미 거기 있고, 렌더러를 두 벌 유지하면
+       반드시 어긋난다. 이 앱은 WebView2 로 그 페이지를 품는 키오스크 셸이며
+       브라우저가 못 하는 것만 보탠다: 항상 전체화면+최상위, 화면 꺼짐 방지,
+       화면 캡처 업로드(/player/screenshot), 서버 주소 저장. -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SignalLinkPlayer</AssemblyName>
+    <RootNamespace>SignalLink.Player</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2957.106" />
+  </ItemGroup>
+
+</Project>

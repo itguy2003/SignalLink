@@ -6,7 +6,6 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { COMMUNITY_ROUTES } from '@/stores/auth'
 import { router } from './index'
 
 const nameOf = (path) => router.resolve(path).name
@@ -33,32 +32,29 @@ describe('콘텐츠 경로', () => {
   })
 })
 
-describe('커뮤니티 유저의 울타리', () => {
-  // 메뉴를 숨기는 것만으로는 주소창에 직접 치고 들어오는 것을 못 막는다.
-  // 서버도 같은 방식으로 경로를 가른다(api/deps.py).
+describe('커뮤니티 경로', () => {
+  // 2026-10 개편: 커뮤니티는 모든 승인 사용자의 공간 — 역할 제한이 없다.
 
-  it('게시판 화면이 있고, 옛 이미지·동영상 화면은 없다', () => {
-    // 공유 이미지·동영상 메뉴는 게시판으로 합쳤다 — 첨부가 곧 재료다.
-    expect(nameOf('/community/board')).toBe('community-board')
-    expect(nameOf('/community/images')).not.toBe('community-images')
-    expect(nameOf('/community/videos')).not.toBe('community-videos')
+  it('게시물 화면이 있고, 옛 게시판·콘텐츠 화면은 없다', () => {
+    expect(nameOf('/community/playlists')).toBe('community-playlists')
+    expect(nameOf('/community/board')).not.toBe('community-board')
+    expect(nameOf('/community/contents')).not.toBe('community-contents')
   })
 
   it('커뮤니티에는 역할 제한이 없다', () => {
     // 누구나 제 커뮤니티를 본다. 올릴 수 있는지는 서버가 답한다.
-    expect(router.resolve('/community/board').meta.roles).toBeUndefined()
+    expect(router.resolve('/community/playlists').meta.roles).toBeUndefined()
   })
 
-  it('관리 화면은 관리자의 것이다', () => {
-    for (const path of ['/organizations', '/users', '/boards']) {
-      expect(router.resolve(path).meta.roles, path).not.toContain('COMMUNITY_USER')
-    }
-  })
-
-  it('여는 목록에 든 이름은 실제 경로다', () => {
-    // 오타가 나면 커뮤니티 유저가 어디로도 못 간다.
-    for (const name of COMMUNITY_ROUTES) {
+  it('편집기(수정) 경로도 살아 있다 — 등록은 목록의 메타 레이어가 한다', () => {
+    for (const name of ['community-playlists', 'community-playlist-edit']) {
       expect(router.hasRoute(name), name).toBe(true)
     }
+    expect(nameOf('/community/playlists/new')).toBe('not-found')
+  })
+
+  it('커뮤니티 전용 가입 경로는 없앴다', () => {
+    // 2026-10 개편: 커뮤니티 유저 역할과 함께 전용 가입도 사라졌다.
+    expect(nameOf('/register/community')).toBe('not-found')
   })
 })

@@ -21,6 +21,7 @@ from app.models.enums import ScheduleKind
 from app.models.schedule import Schedule, ScheduleItem
 from app.schemas.schedule import ScheduleItemOut, SchedulePayload
 from app.services import playlists
+from app.services import transitions as fx
 
 #: 스케줄이 배정되지 않은 장치가 표출할 데모. 버전은 항상 0 이다.
 DEMO_VERSION = 0
@@ -177,9 +178,33 @@ def build_payload(db: Session, device: Device, now: datetime | None = None) -> S
         payload.version = current_version(db, device, moment)
         return payload
 
+    # 공지 참조는 여기서 슬라이드 전체로 펼친다 — 플레이어는 공지의 존재를
+    # 모른다. 기간 밖 공지는 통째로 빠진다(사본이 아니라 참조인 이유).
     items: list[ScheduleItemOut] = []
+    order = 0
     for schedule in active:
-        items.extend(_player_item(item, db) for item in schedule.items)
+        for item in schedule.items:
+            if item.org_notice_id is not None:
+                notice = item.notice_ref
+                if notice is None or not notice_active_on(notice, moment):
+                    continue
+                slides = sorted(notice.items, key=lambda s: s.sort_order)
+                for at, slide in enumerate(slides):
+                    out = _notice_player_item(item, slide, at, db)
+                    out.sort_order = order
+                    order += 1
+                    items.append(out)
+                continue
+            out = _player_item(item, db)
+            out.sort_order = order
+            order += 1
+            items.append(out)
+
+    if not items:
+        # 아이템이 전부 기간 밖 공지였다 — 검은 화면 대신 데모.
+        payload = build_demo_payload()
+        payload.version = current_version(db, device, moment)
+        return payload
 
     first = active[0]
     return SchedulePayload(
@@ -212,6 +237,49 @@ def _player_item(item: ScheduleItem, db: Session | None = None) -> ScheduleItemO
     return out
 
 
+def _expand_period(value: str | None, *, is_end: bool) -> str | None:
+    """날짜만 저장된 옛 값을 분 단위로 넓힌다(시작 00:00 / 종료 23:59)."""
+    if not value:
+        return None
+    if len(value) == 10:
+        return value + ("T23:59" if is_end else "T00:00")
+    return value
+
+
+def notice_active_on(notice, now: datetime) -> bool:  # noqa: ANN001
+    """공지 사용 기간 판정 — 분 단위 문자열 비교, 경계 포함(.NET 동일).
+
+    기간은 **서버 로컬 시각** 기준이다(관리자가 화면에서 고른 시각 그대로).
+    """
+    moment = now.astimezone().strftime("%Y-%m-%dT%H:%M")
+    start = _expand_period(notice.start_date, is_end=False)
+    end = _expand_period(notice.end_date, is_end=True)
+    if start and moment < start:
+        return False
+    return not end or moment <= end
+
+
+def _notice_player_item(item: ScheduleItem, slide, at: int, db: Session | None):  # noqa: ANN001, ANN202
+    """공지 슬라이드 한 장을 플레이어 아이템으로 — 시간대·전환은 참조 아이템의 것."""
+    content = slide.document or {}
+    if db is not None:
+        content = playlists.inline_into_document(db, content)
+    return ScheduleItemOut(
+        # 한 아이템이 여러 장으로 펼쳐지므로 장마다 다른 id 가 필요하다(.NET 동일 산식).
+        id=item.id * 1000 + (at % 1000),
+        schedule_id=item.schedule_id,
+        day_of_week=item.day_of_week,
+        start_time=item.start_time,
+        end_time=item.end_time,
+        sort_order=item.sort_order,
+        duration_sec=slide.duration_sec,
+        transition=fx.normalize(item.transition),
+        transition_ms=fx.normalize_ms(item.transition_ms),
+        content_id=None,
+        content=content,
+    )
+
+
 def replace_items(db: Session, schedule: Schedule, items: list[dict]) -> None:
     """스케줄 아이템을 전체 교체하고 버전을 올린다."""
     schedule.items.clear()
@@ -224,10 +292,14 @@ def replace_items(db: Session, schedule: Schedule, items: list[dict]) -> None:
                 end_time=_as_time(raw.get("end_time")),
                 sort_order=raw.get("sort_order", index),
                 duration_sec=raw.get("duration_sec", 10),
-                content_id=raw.get("content_id"),
-                # 참조 방식이면 인라인 문서를 함께 저장하지 않는다. 두 곳에 사본이
-                # 남으면 어느 쪽이 정본인지 모호해진다.
-                content={} if raw.get("content_id") else (raw.get("content") or {}),
+                transition=raw.get("transition", "none"),
+                transition_ms=raw.get("transition_ms", 600),
+                # 공지 참조가 있으면 그것 하나만 정본이다 — 콘텐츠 참조·인라인은 버린다.
+                org_notice_id=raw.get("org_notice_id"),
+                content_id=None if raw.get("org_notice_id") else raw.get("content_id"),
+                content={}
+                if raw.get("org_notice_id") or raw.get("content_id")
+                else (raw.get("content") or {}),
             )
         )
     bump_version(db, schedule)

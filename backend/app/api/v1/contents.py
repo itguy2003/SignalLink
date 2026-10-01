@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import CurrentUser, DbSession, bad_request, forbid, not_found
 from app.models.content import Content
@@ -38,7 +38,7 @@ def _usage_count(db: DbSession, content_id: int) -> int:
     ).scalar_one()
 
 
-def _summary(db: DbSession, content: Content) -> ContentSummary:
+def _summary(db: DbSession, content: Content, *, shared: bool = False) -> ContentSummary:
     out = ContentSummary.model_validate(content)
     org = db.get(Organization, content.org_id)
     out.org_name = org.name if org else None
@@ -46,17 +46,33 @@ def _summary(db: DbSession, content: Content) -> ContentSummary:
     document = content.document or {}
     out.element_count = len(document.get("elements") or [])
     out.background = (document.get("layout") or {}).get("background", "#000000")
+    # 보는 사람의 관리 범위 밖에서 공유로 열려 온 것인지 — 브라우저 배지의 근거.
+    out.shared = shared
     return out
 
 
-def _detail(db: DbSession, content: Content) -> ContentOut:
+def _detail(db: DbSession, content: Content, *, shared: bool = False) -> ContentOut:
     out = ContentOut.model_validate(content)
-    summary = _summary(db, content)
+    summary = _summary(db, content, shared=shared)
     out.org_name = summary.org_name
     out.usage_count = summary.usage_count
     out.element_count = summary.element_count
     out.background = summary.background
+    out.shared = summary.shared
     return out
+
+
+def _share_clause(db: DbSession, consumer_org_id: int):  # noqa: ANN202
+    """``consumer_org_id`` 기관에서 '공유로 보이는' 콘텐츠의 SQL 조건.
+
+    ``permissions.content_shared_with`` 의 집합 버전 — 목록 질의에 or 로 붙인다.
+    """
+    siblings = permissions.sibling_org_ids(db, consumer_org_id)
+    return or_(
+        Content.share_scope == "전체",
+        and_(Content.share_scope == "동일기관", Content.org_id == consumer_org_id),
+        and_(Content.share_scope == "소속기관", Content.org_id.in_(siblings)),
+    )
 
 
 def _bump_referencing_schedules(db: DbSession, content_id: int) -> list[tuple[int, str, int]]:
@@ -95,19 +111,39 @@ def list_contents(
     q: str | None = None,
     org_id: int | None = None,
     orientation: str | None = Query(default=None, description="landscape | portrait"),
+    share: str | None = Query(default=None, description="mine | shared (비우면 둘 다)"),
     page: int = Query(1, ge=1),
     size: int = Query(24, ge=1, le=200),
 ) -> Page[ContentSummary]:
     stmt = select(Content)
     scope = permissions.managed_org_ids(db, actor)
-    if scope is not None:
-        stmt = stmt.where(Content.org_id.in_(scope))
-    if q:
-        stmt = stmt.where(Content.name.ilike(f"%{q}%"))
+
+    # 공유 판정의 기준 기관은 소비하는 쪽 — org_id 필터가 있으면(스케줄 편집
+    # 맥락) 그 기관, 없으면 보는 사람의 기관.
+    consumer_org = org_id if org_id is not None else actor.org_id
+    share_clause = _share_clause(db, consumer_org)
+
+    base_ids: set[int] | None = None
     if org_id is not None:
         if not permissions.can_view_org(db, actor, org_id):
             raise forbid("해당 기관의 콘텐츠를 조회할 권한이 없습니다.")
-        stmt = stmt.where(Content.org_id.in_(org_tree.descendant_ids(db, org_id)))
+        base_ids = org_tree.descendant_ids(db, org_id)
+    elif scope is not None:
+        base_ids = scope
+
+    # share: mine = 관리 범위의 것만 | shared = 공유로 열려 온 것만 | 비면 둘 다.
+    if share == "mine":
+        if base_ids is not None:
+            stmt = stmt.where(Content.org_id.in_(base_ids))
+    elif share == "shared":
+        stmt = stmt.where(share_clause)
+        if base_ids is not None:
+            stmt = stmt.where(Content.org_id.notin_(base_ids))
+    elif base_ids is not None:
+        stmt = stmt.where(or_(Content.org_id.in_(base_ids), share_clause))
+
+    if q:
+        stmt = stmt.where(Content.name.ilike(f"%{q}%"))
     if orientation == "portrait":
         stmt = stmt.where(Content.height > Content.width)
     elif orientation == "landscape":
@@ -122,7 +158,13 @@ def list_contents(
         .all()
     )
     return Page[ContentSummary](
-        items=[_summary(db, c) for c in rows], total=total, page=page, size=size
+        items=[
+            _summary(db, c, shared=base_ids is not None and c.org_id not in base_ids)
+            for c in rows
+        ],
+        total=total,
+        page=page,
+        size=size,
     )
 
 
@@ -131,9 +173,11 @@ def get_content(content_id: int, actor: CurrentUser, db: DbSession) -> ContentOu
     content = db.get(Content, content_id)
     if content is None:
         raise not_found("콘텐츠")
-    if not permissions.can_view_org(db, actor, content.org_id):
+    own = permissions.can_view_org(db, actor, content.org_id)
+    # 관리 범위 밖이라도 공유 구분이 열어 주면 읽을 수 있다(수정·삭제는 불가).
+    if not own and not permissions.content_shared_with(db, content, actor.org_id):
         raise forbid("해당 콘텐츠를 조회할 권한이 없습니다.")
-    return _detail(db, content)
+    return _detail(db, content, shared=not own)
 
 
 @router.post(
@@ -145,6 +189,8 @@ def create_content(payload: ContentCreate, actor: CurrentUser, db: DbSession) ->
         raise forbid("해당 기관에 콘텐츠를 만들 권한이 없습니다.")
     if db.get(Organization, org_id) is None:
         raise bad_request("존재하지 않는 기관입니다.")
+    if payload.share_scope not in permissions.CONTENT_SHARE_SCOPES:
+        raise bad_request(permissions.CONTENT_SHARE_SCOPE_ERROR)
 
     content = Content(
         name=payload.name,
@@ -154,6 +200,7 @@ def create_content(payload: ContentCreate, actor: CurrentUser, db: DbSession) ->
         width=payload.width,
         height=payload.height,
         document=payload.document or empty_document(payload.width, payload.height),
+        share_scope=payload.share_scope,
         version=1,
     )
     db.add(content)
@@ -182,6 +229,11 @@ def update_content(
         raise not_found("콘텐츠")
     if not permissions.can_manage_org(db, actor, content.org_id) and content.created_by != actor.id:
         raise forbid("해당 콘텐츠를 수정할 권한이 없습니다.")
+    if (
+        payload.share_scope is not None
+        and payload.share_scope not in permissions.CONTENT_SHARE_SCOPES
+    ):
+        raise bad_request(permissions.CONTENT_SHARE_SCOPE_ERROR)
 
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -209,6 +261,7 @@ def duplicate_content(content_id: int, actor: CurrentUser, db: DbSession) -> Con
     if not permissions.can_view_org(db, actor, source.org_id):
         raise forbid("해당 콘텐츠를 복제할 권한이 없습니다.")
 
+    # 복사본은 '없음'으로 시작한다 — 공유는 명시적인 행동이어야 한다.
     copy = Content(
         name=f"{source.name} (복사본)",
         description=source.description,

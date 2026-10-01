@@ -415,4 +415,5 @@ export const ELEMENT_ICONS = {
   image: '🏞',
   video: '▶',
   web: '🌐',
+  qrcode: '🔳',
 }

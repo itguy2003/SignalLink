@@ -111,6 +111,8 @@ class ContentCreate(ContentBase):
     org_id: int | None = None
     #: 비우면 빈 문서로 시작한다.
     document: dict[str, Any] | None = None
+    #: 공유 구분(값 검증은 라우터에서 한국어 오류 문구로 한다).
+    share_scope: str = "없음"
 
 
 class ContentUpdate(BaseModel):
@@ -119,6 +121,7 @@ class ContentUpdate(BaseModel):
     width: int | None = Field(default=None, ge=1, le=32767)
     height: int | None = Field(default=None, ge=1, le=32767)
     document: dict[str, Any] | None = None
+    share_scope: str | None = None
 
 
 class ContentSummary(ContentBase):
@@ -138,6 +141,11 @@ class ContentSummary(ContentBase):
     #: 브라우저에서 미리보기 카드를 그리기 위한 최소 정보
     element_count: int = 0
     background: str = "#000000"
+    #: 공유 구분('없음'|'동일기관'|'소속기관'|'전체')
+    share_scope: str = "없음"
+    #: 보는 사람의 관리 범위 밖에서 공유로 열려 온 것인지 — 브라우저가
+    #: 출처 배지를 그리고 수정 진입을 막는 근거.
+    shared: bool = False
 
 
 class ContentOut(ContentSummary):

@@ -67,6 +67,18 @@ export function writePlaylistDrag(event, playlist) {
   )
 }
 
+/**
+ * 소속기관 공지 — **참조**로 실어 나른다. 스케줄 아이템이 공지 id 를 들고,
+ * 표출 시 서버가 슬라이드 전체로 펼친다. 공지를 고치면 자동으로 반영된다.
+ */
+export function writeOrgNoticeDrag(event, notice) {
+  write(
+    event,
+    { kind: 'org-notice', id: notice.id, name: notice.name },
+    notice.name,
+  )
+}
+
 export function writeWidgetDrag(event, widget, { width = 1920, height = 1080 } = {}) {
   write(
     event,
@@ -82,6 +94,7 @@ export function readContentDrag(event) {
     if (!parsed || typeof parsed !== 'object') return null
     if (parsed.kind === 'widget' && typeof parsed.key === 'string') return parsed
     if (parsed.kind === 'playlist' && typeof parsed.id === 'number') return parsed
+    if (parsed.kind === 'org-notice' && typeof parsed.id === 'number') return parsed
     if (typeof parsed.id === 'number') return { kind: 'content', ...parsed }
     return null
   } catch {

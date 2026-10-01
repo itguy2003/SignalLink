@@ -146,37 +146,23 @@ onBeforeRouteLeave(() => dirty.value === false || confirm(t('widgetPlaylist.conf
   <p v-else-if="missing" class="table-empty">{{ t('widgetPlaylist.notFound') }}</p>
 
   <div v-else class="page">
+    <!-- 이름·설명·버튼을 한 줄에 나란히 — 입력란들의 세로선이 맞아야 한다.
+         메타(개수·버전·사용처)는 아랫줄로 내린다. -->
     <header class="head card">
-      <div>
-        <input
-          v-model="name"
-          class="input title-input"
-          :placeholder="t('widgetPlaylist.name')"
-          @input="markDirty"
-        />
-        <div class="hint">
-          <template v-if="source">
-            {{
-              t('widgetPlaylist.meta', {
-                count: items.length,
-                version: source.version,
-                usage: source.usage_count ?? 0,
-              })
-            }}
-          </template>
-          <template v-else>{{ t('widgetPlaylist.newMeta') }}</template>
-          <span v-if="dirty" class="badge badge-warning">{{ t('common.unsaved') }}</span>
-        </div>
-      </div>
-
-      <div class="spacer" />
-
+      <input
+        v-model="name"
+        class="input title-input"
+        :placeholder="t('widgetPlaylist.name')"
+        @input="markDirty"
+      />
       <input
         v-model="description"
         class="input desc-input"
         :placeholder="t('widgetPlaylist.description')"
         @input="markDirty"
       />
+      <div class="spacer" />
+
       <!-- 저장 전 순서 그대로 재생한다. 저장해야만 볼 수 있으면
            시간을 맞추는 일이 저장-확인-수정의 반복이 된다. -->
       <button class="btn" :disabled="items.length === 0" @click="previewOpen = true">
@@ -186,6 +172,20 @@ onBeforeRouteLeave(() => dirty.value === false || confirm(t('widgetPlaylist.conf
       <button class="btn btn-primary" :disabled="saving" @click="save">
         {{ saving ? t('common.saving') : t('common.save') }}
       </button>
+
+      <div class="hint meta-line">
+        <template v-if="source">
+          {{
+            t('widgetPlaylist.meta', {
+              count: items.length,
+              version: source.version,
+              usage: source.usage_count ?? 0,
+            })
+          }}
+        </template>
+        <template v-else>{{ t('widgetPlaylist.newMeta') }}</template>
+        <span v-if="dirty" class="badge badge-warning">{{ t('common.unsaved') }}</span>
+      </div>
     </header>
 
     <p class="page-desc">{{ t('widgetPlaylist.editorDesc') }}</p>
@@ -237,7 +237,14 @@ onBeforeRouteLeave(() => dirty.value === false || confirm(t('widgetPlaylist.conf
 }
 
 .desc-input {
-  width: 240px;
+  width: 280px;
+}
+
+/* 힌트는 줄바꿈으로 아랫줄 전체를 차지한다 — 윗줄의 입력란·버튼은
+   한 줄에서 세로 가운데가 맞는다. */
+.meta-line {
+  flex-basis: 100%;
+  margin-top: -2px;
 }
 
 .spacer {

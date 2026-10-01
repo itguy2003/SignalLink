@@ -24,6 +24,8 @@ const props = defineProps({
    * 조회 경로. 로그인 전 화면(회원가입)은 `/organizations/public` 을 쓴다.
    */
   endpoint: { type: String, default: '/organizations' },
+  /** 조회에 덧붙일 파라미터. 커뮤니티 가입은 { category: '기관' } 으로 좁힌다. */
+  params: { type: Object, default: () => ({}) },
   disabled: { type: Boolean, default: false },
 })
 
@@ -45,6 +47,7 @@ async function search() {
   loading.value = true
   try {
     const items = await api.get(props.endpoint, {
+      ...props.params,
       q: query.value.trim() || undefined,
       limit: LIMIT + 1,
     })

@@ -8,6 +8,7 @@ import { api } from '@/api/client'
 import ModalDialog from '@/components/ModalDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToastStore } from '@/stores/toast'
+import { SHARE_SCOPES, shareLabelKey } from '@/utils/contentShare'
 
 const auth = useAuthStore()
 const toast = useToastStore()
@@ -27,9 +28,12 @@ const form = ref({ name: '', description: '', org_id: '', orientation: 'landscap
 async function load(pageNumber = page.value.page) {
   loading.value = true
   try {
+    // 이 화면은 내 라이브러리 관리다 — 공유받은 콘텐츠는 스케줄 편집기의
+    // 콘텐츠 브라우저에서 보이고, 여기서는 내 관리 범위의 것만 다룬다.
     page.value = await api.get('/contents', {
       q: filters.value.q || undefined,
       orientation: filters.value.orientation || undefined,
+      share: 'mine',
       page: pageNumber,
       size: page.value.size,
     })
@@ -51,9 +55,23 @@ function openCreate() {
     description: '',
     org_id: auth.user?.org_id ?? '',
     orientation: 'landscape',
+    share_scope: '없음',
   }
   formError.value = ''
   dialog.value = true
+}
+
+/** 공유 구분 변경 — 저장 즉시 반영한다(별도 저장 버튼 없음). */
+async function setShare(content, scope) {
+  const before = content.share_scope
+  content.share_scope = scope
+  try {
+    await api.put(`/contents/${content.id}`, { share_scope: scope })
+    toast.success(t('content.shareUpdated'))
+  } catch (err) {
+    content.share_scope = before
+    toast.error(err.detail ?? t('content.shareUpdateFailed'))
+  }
 }
 
 async function create() {
@@ -67,6 +85,7 @@ async function create() {
       org_id: Number(form.value.org_id),
       width: portrait ? 1080 : 1920,
       height: portrait ? 1920 : 1080,
+      share_scope: form.value.share_scope,
     })
     dialog.value = false
     toast.success(t('content.created'))
@@ -161,6 +180,20 @@ function formatDate(value) {
               </span>
               <span v-else class="badge badge-muted">{{ t('content.unused') }}</span>
             </div>
+            <!-- 공유 구분 — 여기서 바로 바꾼다. 값은 서버 계약(한국어) 그대로. -->
+            <label class="sub share-row">
+              <span class="muted">{{ t('content.share') }}</span>
+              <select
+                class="select share-select"
+                :value="content.share_scope"
+                data-test="share-select"
+                @change="setShare(content, $event.target.value)"
+              >
+                <option v-for="scope in SHARE_SCOPES" :key="scope" :value="scope">
+                  {{ t(shareLabelKey(scope)) }}
+                </option>
+              </select>
+            </label>
           </div>
 
           <div class="tile-actions">
@@ -218,6 +251,15 @@ function formatDate(value) {
         <label>{{ t('auth.org') }}</label>
         <select v-model="form.org_id" class="select">
           <option v-for="org in orgs" :key="org.id" :value="org.id">{{ org.name }}</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>{{ t('content.share') }}</label>
+        <select v-model="form.share_scope" class="select" data-test="create-share">
+          <option v-for="scope in SHARE_SCOPES" :key="scope" :value="scope">
+            {{ t(shareLabelKey(scope)) }}
+          </option>
         </select>
       </div>
 
@@ -309,6 +351,20 @@ function formatDate(value) {
   gap: 10px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.share-select {
+  width: auto;
+  max-width: 150px;
+  padding: 2px 6px;
   font-size: 12px;
 }
 </style>

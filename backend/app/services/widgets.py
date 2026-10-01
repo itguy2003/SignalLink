@@ -280,14 +280,20 @@ COMMUNITY = register(
         key="community",
         name="커뮤니티",
         category="콘텐츠형",
-        description="커뮤니티 콘텐츠를 재생목록처럼 순환 표출",
+        description="커뮤니티 게시물을 순환 표출",
         data_driven=True,
         refresh_sec=600,
         default_size={"w": 800, "h": 600},
-        # 옵션이 없다. 무엇을 틀지는 서버가 고른다 — 콘텐츠의 사용기간과
-        # 사용대상(장치의 학교급)에 맞는 것 중 가장 최근 것. 화면마다 고르게
-        # 하면 기간이 지나거나 대상이 어긋난 채 방치된다.
-        options=[],
+        # 기본은 서버가 고른다 — '게시' 상태의 최신 재생목록. 화면마다 고르게
+        # 하면 게시가 끝난 것이 방치된다. 다만 편집자가 상위기관 커뮤니티의
+        # **특정 재생목록**을 집어 삽입할 수도 있다 — playlist_id 지정.
+        options=[
+            WidgetOptionSpec(
+                key="playlist_id",
+                label="표시할 게시물(비우면 자동 선택)",
+                type="community_playlist",
+            ),
+        ],
     )
 )
 
@@ -436,47 +442,62 @@ def _painting_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
 
 @data_provider("community")
 def _community_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
-    """커뮤니티 위젯이 틀 콘텐츠.
+    """커뮤니티 위젯이 틀 재생목록.
 
-    장치(플레이어)와 편집기 미리보기가 함께 부른다. 무엇을 틀지는 서버가
-    고른다 — 화면마다 고르게 하면 기간이 지나거나 대상이 어긋난 채 방치된다.
+    장치(플레이어)와 편집기 미리보기가 함께 부른다. 기본은 서버가 고른다 —
+    '게시' 상태이고 칸이 하나라도 있는 **가장 최근 재생목록**. 편집자가
+    playlist_id 로 특정 재생목록을 집었으면 그것을 튼다.
 
-    울타리    요청한 기관의 커뮤니티 것만 나간다.
-    사용기간  콘텐츠가 들고 있다. 기간 밖이면 후보에서 빠진다.
-    사용대상  장치가 놓인 기관의 학교급과 맞아야 한다 — 초등학교 장치에는
-              '초' 와 '전체' 만 나간다. 학교급이 없는 곳(교육청)은 '전체' 만.
-
-    맞는 것 중 **가장 최근 것 하나**를 튼다. 최신 것이 기간 밖이면 그 아래에서
-    찾는다 — 빈 화면보다 낫다.
+    울타리      요청한 기관의 커뮤니티 것만 나간다.
+    게시 여부   '게시' 만 나간다 — 지정 삽입이라도 게시 전이면 틀지 않는다.
+    응답 모양   {active, title, description, version, items, total_duration_sec}.
+                items 는 칸마다 url·thumb_url·title 이 붙은 재생 순서 그대로다.
     """
     from sqlalchemy import select as _select
 
-    from app.models.community_content import CommunityContent
-    from app.models.organization import Organization
+    from app.api.v1.community import resolve_items, total_duration_sec
+    from app.models.community_playlist import CommunityPlaylist
     from app.services import permissions
 
     community_org = permissions.community_org_of(db, org_id)
     if community_org is None:
         return None
 
-    org = db.get(Organization, org_id)
-    level = org.school_level if org else None
-    audiences = {"전체"} | ({str(level)} if level else set())
+    inactive = {
+        "active": False, "title": None, "version": 0,
+        "items": [], "total_duration_sec": 0,
+    }
 
-    today = date.today().isoformat()
+    def _active(playlist: CommunityPlaylist) -> dict[str, Any]:
+        items = resolve_items(playlist)
+        return {
+            "active": True,
+            "title": playlist.title,
+            "memo": playlist.memo,
+            "version": playlist.version,
+            "items": items,
+            "total_duration_sec": total_duration_sec(items),
+        }
 
-    def _fits(row: CommunityContent) -> bool:
-        if row.audience not in audiences:
-            return False
-        if row.start_date and today < row.start_date:
-            return False
-        return not (row.end_date and today > row.end_date)
+    picked = options.get("playlist_id")
+    if picked:
+        try:
+            picked_id = int(picked)
+        except (TypeError, ValueError):
+            picked_id = 0
+        chosen = db.get(CommunityPlaylist, picked_id) if picked_id > 0 else None
+        if chosen is None or chosen.org_id != community_org or chosen.publish_status != "게시":
+            return inactive
+        return _active(chosen)
 
     rows = (
         db.execute(
-            _select(CommunityContent)
-            .where(CommunityContent.org_id == community_org)
-            .order_by(CommunityContent.id.desc())
+            _select(CommunityPlaylist)
+            .where(
+                CommunityPlaylist.org_id == community_org,
+                CommunityPlaylist.publish_status == "게시",
+            )
+            .order_by(CommunityPlaylist.id.desc())
         )
         .scalars()
         .all()
@@ -484,19 +505,9 @@ def _community_data(db: Session, org_id: int, options: dict[str, Any]) -> Any:
     if not rows:
         return None
 
-    content = next((row for row in rows if _fits(row)), None)
-    if content is None:
-        # 콘텐츠는 있는데 지금 이 장치에 틀 것이 없다(기간 밖이거나 대상 밖).
-        return {"active": False, "title": None, "version": 0, "document": None}
-
-    # 문서는 CMS 콘텐츠와 같은 계약이라 플레이어가 그대로 그린다. 자산 주소는
-    # 편집기가 저장할 때부터 열쇠 붙은 공개 주소다(``services/assets.public_url``).
-    return {
-        "active": True,
-        "title": content.title,
-        "version": content.version,
-        "document": content.document,
-    }
+    # 칸이 하나라도 있는 최신 것 — 빈 재생목록을 틀면 검은 화면이 된다.
+    playlist = next((row for row in rows if resolve_items(row)), None)
+    return inactive if playlist is None else _active(playlist)
 
 
 @data_provider("weather")

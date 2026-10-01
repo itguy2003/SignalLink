@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession, bad_request, forbid, not_found
 from app.models.content import Content
+from app.models.org_notice import OrgNotice
 from app.models.device import Device, DeviceScheduleLink
 from app.models.schedule import Schedule
 from app.schemas.common import Message, Page
@@ -70,6 +71,7 @@ def _validate_items(
     actor,  # noqa: ANN001
     items: list[dict],
     expected_orientation: str,
+    schedule_org_id: int,
 ) -> None:
     """아이템 저장 전 검사.
 
@@ -89,8 +91,26 @@ def _validate_items(
             content = found.get(content_id)
             if content is None:
                 raise bad_request(f"존재하지 않는 콘텐츠입니다: {content_id}")
-            if not permissions.can_view_org(db, actor, content.org_id):
+            # 관리 범위 밖이라도 공유 구분이 스케줄의 기관에 열려 있으면 쓸 수 있다.
+            if not permissions.can_view_org(db, actor, content.org_id) and not (
+                permissions.content_shared_with(db, content, schedule_org_id)
+            ):
                 raise forbid(f"콘텐츠 '{content.name}' 을(를) 사용할 권한이 없습니다.")
+
+    # 공지 참조 검사 — 스케줄 기관의 자기/상위기관 공지만 쓸 수 있다.
+    notice_ids = {item["org_notice_id"] for item in items if item.get("org_notice_id")}
+    if notice_ids:
+        notices = {
+            n.id: n
+            for n in db.execute(select(OrgNotice).where(OrgNotice.id.in_(notice_ids))).scalars()
+        }
+        chain = set(org_tree.ancestor_ids(db, schedule_org_id, include_self=True))
+        for notice_id in notice_ids:
+            notice = notices.get(notice_id)
+            if notice is None:
+                raise bad_request(f"존재하지 않는 공지입니다: {notice_id}")
+            if notice.org_id not in chain:
+                raise forbid(f"이 기관에서 쓸 수 없는 공지입니다: '{notice.name}'")
 
     _assert_orientation(items, found, expected_orientation)
 
@@ -236,7 +256,7 @@ def create_schedule(
 
     if payload.items:
         items = [item.model_dump(mode="json") for item in payload.items]
-        _validate_items(db, actor, items, schedule.orientation)
+        _validate_items(db, actor, items, schedule.orientation, schedule.org_id)
         schedule_service.replace_items(db, schedule, items)
     db.commit()
     db.refresh(schedule)
@@ -263,7 +283,7 @@ def update_schedule(
     # 검사를 먼저 끝내고 나서 바꾼다. 순서를 뒤집으면 거부된 요청이 세션에
     # 변경을 남긴 채 롤백에 기대게 된다.
     if items is not None:
-        _validate_items(db, actor, items, new_orientation)
+        _validate_items(db, actor, items, new_orientation, schedule.org_id)
     elif new_orientation != schedule.orientation:
         # 방향만 바꾸는 경우. 이미 붙어 있는 콘텐츠가 새 방향과 맞아야 한다.
         # 안 맞는데 통과시키면 장치에서 검은 띠만 남은 화면이 나간다.
@@ -272,6 +292,7 @@ def update_schedule(
             actor,
             [{"content_id": i.content_id, "content": i.content} for i in schedule.items],
             new_orientation,
+            schedule.org_id,
         )
 
     # 한쪽만 보내오는 경우가 흔하다(행사가 하루 밀렸다 → 종료만 고친다).

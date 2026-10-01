@@ -516,3 +516,43 @@ def test_deleted_playlist_leaves_empty_items(client, super_headers, school_id, m
         json={"name": "콘텐츠", "org_id": school_id, "document": document},
     )
     assert content.status_code == 201
+
+
+# ------------------------------------------------------------------ 인라인 참조 연쇄
+
+
+def test_update_bumps_schedule_with_inline_reference(
+    client, super_headers, school_id, make_playlist
+):
+    # 스케줄 아이템이 재생목록을 인라인 문서로 직접 들 수 있다(라이브러리
+    # 콘텐츠 없이 스케줄에 놓은 경우). 재생목록을 고치면 그 스케줄의 버전도
+    # 올라야 장치가 변경을 알아챈다.
+    playlist = make_playlist('현관 순환').json()
+    inline_document = {
+        'version': 1,
+        'layout': {'width': 1920, 'height': 1080, 'background': '#000000'},
+        'elements': [{
+            'id': 'el-1', 'type': 'playlist',
+            'rect': {'x': 0, 'y': 0, 'w': 1920, 'h': 1080, 'z': 1},
+            'options': {'playlist_id': playlist['id']},
+        }],
+    }
+    schedule = client.post(
+        '/api/v1/schedules',
+        headers=super_headers,
+        json={
+            'name': '인라인 스케줄', 'kind': '목록반복', 'org_id': school_id,
+            'items': [{'day_of_week': -1, 'duration_sec': 15, 'content': inline_document}],
+        },
+    ).json()
+
+    client.put(
+        f"/api/v1/playlists/{playlist['id']}",
+        headers=super_headers,
+        json={'items': [{'widget_key': 'clock', 'duration_sec': 5}]},
+    )
+
+    after = client.get(
+        f"/api/v1/schedules/{schedule['id']}", headers=super_headers
+    ).json()
+    assert after['version'] > schedule['version']

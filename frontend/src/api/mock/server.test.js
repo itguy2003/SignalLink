@@ -4,7 +4,7 @@
  * 모의 서버가 실제 백엔드와 같은 권한 규칙을 따르는지 확인한다. 여기가 어긋나면
  * 테스트 모드에서 확인한 화면 동작이 실제 서버에서 재현되지 않는다.
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { mockServer } from './server'
 
@@ -891,7 +891,7 @@ describe('장치 다중 스케줄', () => {
   })
 
   it('기간 밖 스케줄은 걸려 있어도 active 가 false 다', async () => {
-    // 시드의 스케줄 2 는 2026-10 행사 기간이라 지금은 기간 밖이다.
+    // 시드의 스케줄 2 는 미래의 행사 기간이라 지금은 기간 밖이다.
     const token = await loginAs('admin', 'admin1234')
     const device = await mockServer.handle('PUT', '/devices/1/schedules', {
       token,
@@ -982,5 +982,290 @@ describe('라우팅', () => {
     const specs = await mockServer.handle('GET', '/widgets', { token })
     expect(specs.length).toBeGreaterThan(10)
     expect(specs.map((s) => s.key)).toContain('notice')
+  })
+})
+
+
+describe('스톡 검색(Pixabay)', () => {
+  afterEach(() => {
+    mockServer.pixabayKey = ''
+    vi.unstubAllGlobals()
+  })
+
+  it('키가 없으면 자리표시 그림으로 채운다', async () => {
+    // .env.local 에 키가 있어도 이 테스트는 '키 없음' 경로를 본다.
+    mockServer.pixabayKey = ''
+    const token = await loginAs('admin', 'admin1234')
+    const result = await mockServer.handle('GET', '/stock/search', {
+      token,
+      params: { q: '하늘', kind: 'image' },
+    })
+    expect(result.items).toHaveLength(12)
+    expect(result.items[0].author).toBe('테스트')
+  })
+
+  it('키가 있으면 실제 Pixabay 를 서버 프록시와 같은 매핑으로 부른다', async () => {
+    mockServer.pixabayKey = 'test-key'
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        totalHits: 1,
+        hits: [
+          {
+            id: 42,
+            previewURL: 'https://cdn/p.jpg',
+            webformatURL: 'https://cdn/w.jpg',
+            largeImageURL: 'https://cdn/l.jpg',
+            imageWidth: 1920,
+            imageHeight: 1080,
+            tags: 'sky',
+            user: 'author1',
+            pageURL: 'https://pixabay.com/x',
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const token = await loginAs('admin', 'admin1234')
+    const result = await mockServer.handle('GET', '/stock/search', {
+      token,
+      params: { q: 'sky', kind: 'image', orientation: 'horizontal', per_page: 24 },
+    })
+
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url).toContain('https://pixabay.com/api/?')
+    expect(url).toContain('key=test-key')
+    expect(url).toContain('safesearch=true')
+    expect(url).toContain('image_type=photo')
+    expect(url).toContain('orientation=horizontal')
+
+    // 서버(services/pixabay.py)와 같은 추림 — large 우선.
+    expect(result.items[0]).toMatchObject({
+      kind: 'image',
+      id: 42,
+      url: 'https://cdn/l.jpg',
+      author: 'author1',
+      page: 'https://pixabay.com/x',
+    })
+    expect(result.total).toBe(1)
+  })
+
+  it('동영상은 화질 우선순위(large→tiny)로 주소를 고른다', async () => {
+    mockServer.pixabayKey = 'test-key'
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        totalHits: 1,
+        hits: [
+          {
+            id: 7,
+            picture_id: 'pic123',
+            duration: 12,
+            tags: 'sea',
+            user: 'author2',
+            pageURL: 'https://pixabay.com/v',
+            videos: {
+              large: {},
+              medium: { url: 'https://cdn/m.mp4', width: 1280, height: 720 },
+            },
+          },
+        ],
+      }),
+    })))
+
+    const token = await loginAs('admin', 'admin1234')
+    const result = await mockServer.handle('GET', '/stock/search', {
+      token,
+      params: { q: 'sea', kind: 'video' },
+    })
+    expect(result.items[0].url).toBe('https://cdn/m.mp4')
+    expect(result.items[0].preview).toContain('pic123')
+  })
+
+  it('연결 실패는 실제 서버와 같은 문구로 알린다', async () => {
+    mockServer.pixabayKey = 'test-key'
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('offline')
+    }))
+
+    const token = await loginAs('admin', 'admin1234')
+    await expect(
+      mockServer.handle('GET', '/stock/search', { token, params: { q: 'x' } }),
+    ).rejects.toMatchObject({ detail: '검색 서버에 연결할 수 없습니다.' })
+  })
+})
+
+describe('커뮤니티 공지 팝업', () => {
+  // 2026-10 개편: 게시물은 공지대상(기관구분)·공지희망기간을 갖고,
+  // '게시' + 대상·기간이 맞는 글만 로그인 팝업(/community/popup)에 실린다.
+
+  it('학교 소속 사용자에게 학교 대상 공지가 실린다', async () => {
+    const token = await loginAs('school_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items.map((n) => n.title)).toContain('가을 축제 자원봉사 모집')
+    expect(items[0].memo).toBeTruthy()
+  })
+
+  it('기관 소속 사용자는 학교 대상 공지를 받지 않는다', async () => {
+    const token = await loginAs('edu_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items.map((n) => n.title)).not.toContain('가을 축제 자원봉사 모집')
+  })
+
+  it('기간이 지난 공지는 실리지 않는다', async () => {
+    const token = await loginAs('edu_admin', 'test1234')
+    // 시드 공지를 어제로 끝낸다 — 기간 밖이 된다.
+    mockServer.communityPlaylists[0].notice_end = '2000-01-01'
+    const schoolToken = await loginAs('school_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token: schoolToken })
+    expect(items).toHaveLength(0)
+  })
+
+  it('게시 전(대기중) 공지는 실리지 않는다', async () => {
+    mockServer.communityPlaylists[0].publish_status = '대기중'
+    const token = await loginAs('school_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items).toHaveLength(0)
+  })
+
+  it('공지대상이 비어 있으면 전체 대상이다', async () => {
+    mockServer.communityPlaylists[0].target_org_types = []
+    const token = await loginAs('edu_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items.map((n) => n.title)).toContain('가을 축제 자원봉사 모집')
+  })
+
+  it('공지대상은 기관구분 마스터의 이름만 받는다', async () => {
+    const token = await loginAs('edu_admin')
+    await expect(
+      mockServer.handle('POST', '/community/playlists', {
+        token,
+        body: { title: '잘못된 대상', target_org_types: ['없는구분'] },
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('공지희망기간은 형식과 순서를 지켜야 한다', async () => {
+    const token = await loginAs('edu_admin')
+    await expect(
+      mockServer.handle('POST', '/community/playlists', {
+        token,
+        body: { title: '형식 오류', notice_start: '2026/10/01' },
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      mockServer.handle('POST', '/community/playlists', {
+        token,
+        body: { title: '순서 오류', notice_start: '2026-10-20', notice_end: '2026-10-01' },
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+describe('공지대상 선택지는 기관구분 마스터다', () => {
+  it('기관구분 관리에 새 구분을 등록하면 곧장 공지대상으로 쓸 수 있다', async () => {
+    const admin = await loginAs('admin', 'admin1234')
+    await mockServer.handle('POST', '/org-types', {
+      token: admin,
+      body: { name: '평생교육기관', category: '기관' },
+    })
+    const created = await mockServer.handle('POST', '/community/playlists', {
+      token: admin,
+      body: { title: '새 구분 대상', target_org_types: ['평생교육기관'] },
+    })
+    expect(created.target_org_types).toEqual(['평생교육기관'])
+  })
+
+  it('시드에도 기본 3종 외 구분(유치원)이 있다 — 선택지는 마스터를 따른다', async () => {
+    const admin = await loginAs('admin', 'admin1234')
+    const rows = await mockServer.handle('GET', '/org-types', { token: admin })
+    expect(rows.map((row) => row.name)).toContain('유치원')
+  })
+})
+
+describe('세부 구분(분류) 공지대상', () => {
+  // "학교"(구분 전체)뿐 아니라 "학교:초" 같은 분류 단위도 대상이 된다.
+  // 시드: 가나초등학교(org 3)는 org_type '학교', school_level '초'.
+
+  it("'학교:초' 공지는 초등학교 소속에게 실린다", async () => {
+    mockServer.communityPlaylists[0].target_org_types = ['학교:초']
+    const token = await loginAs('school_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items.map((n) => n.title)).toContain('가을 축제 자원봉사 모집')
+  })
+
+  it("'학교:고' 공지는 초등학교 소속에게 실리지 않는다", async () => {
+    mockServer.communityPlaylists[0].target_org_types = ['학교:고']
+    const token = await loginAs('school_admin')
+    const items = await mockServer.handle('GET', '/community/popup', { token })
+    expect(items).toHaveLength(0)
+  })
+
+  it('세부 구분을 공지대상으로 등록할 수 있다', async () => {
+    const token = await loginAs('edu_admin')
+    const created = await mockServer.handle('POST', '/community/playlists', {
+      token,
+      body: { title: '초등 대상', target_org_types: ['학교:초'] },
+    })
+    expect(created.target_org_types).toEqual(['학교:초'])
+  })
+
+  it('분류 선택지에 없는 세부 구분은 거절한다', async () => {
+    const token = await loginAs('edu_admin')
+    await expect(
+      mockServer.handle('POST', '/community/playlists', {
+        token,
+        body: { title: '없는 분류', target_org_types: ['학교:대학'] },
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+describe('커뮤니티 칸은 콘텐츠 문서다', () => {
+  // 2026-10: 소속기관 공지와 같은 계약 — {document, duration_sec}. 실서버와 같은 문구.
+  const doc = (text) => ({
+    version: 1,
+    layout: { width: 1920, height: 1080, background: '#000000' },
+    elements: [{ id: 'e1', type: 'text', rect: { x: 0, y: 0, w: 100, h: 50, z: 1 }, options: { text } }],
+  })
+
+  it('문서 칸을 담으면 전체 재생시간은 칸 시간의 합이다', async () => {
+    const token = await loginAs('edu_admin')
+    const created = await mockServer.handle('POST', '/community/playlists', {
+      token,
+      body: { title: '문서 칸' },
+    })
+    const updated = await mockServer.handle('PUT', `/community/playlists/${created.id}`, {
+      token,
+      body: { items: [{ document: doc('하나'), duration_sec: 8 }, { document: doc('둘'), duration_sec: 12 }] },
+    })
+    expect(updated.items.map((i) => i.document.elements[0].options.text)).toEqual(['하나', '둘'])
+    expect(updated.total_duration_sec).toBe(20)
+  })
+
+  it('문서가 없는 옛 모양 칸과 커뮤니티 위젯이 든 문서는 거절한다', async () => {
+    const token = await loginAs('edu_admin')
+    const created = await mockServer.handle('POST', '/community/playlists', {
+      token,
+      body: { title: '검증' },
+    })
+    await expect(
+      mockServer.handle('PUT', `/community/playlists/${created.id}`, {
+        token,
+        body: { items: [{ kind: 'image', asset_id: 1, duration_sec: 10 }] },
+      }),
+    ).rejects.toMatchObject({ status: 400, detail: '칸에는 콘텐츠 문서가 있어야 합니다.' })
+
+    const nested = doc('안내')
+    nested.elements.push({ id: 'w1', type: 'widget', widget_key: 'community', rect: {}, options: {} })
+    await expect(
+      mockServer.handle('PUT', `/community/playlists/${created.id}`, {
+        token,
+        body: { items: [{ document: nested, duration_sec: 10 }] },
+      }),
+    ).rejects.toMatchObject({ status: 400, detail: '커뮤니티 게시물 안에는 커뮤니티 위젯을 넣을 수 없습니다.' })
   })
 })

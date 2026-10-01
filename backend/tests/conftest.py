@@ -21,6 +21,11 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ.setdefault("DEVICE_MASTER_KEY", "test-device-master-key")
 os.environ.setdefault("BOOTSTRAP_ADMIN_ID", "admin")
 os.environ.setdefault("BOOTSTRAP_ADMIN_PASSWORD", "admin1234")
+# 개발자의 .env 에 흔들리지 않게 강제한다(테스트 밀폐). .env 가 운영
+# PostgreSQL 을 가리키고 있어도 테스트는 임시 SQLite 로 돌고, DATABASE_URL
+# 에서 파생되는 토글(암호 복잡도 auto 등)도 개발 기본값으로 판정돼야 한다.
+os.environ["DATABASE_URL"] = ""
+os.environ["PASSWORD_COMPLEXITY"] = "auto"
 
 from app.db.base import Base  # noqa: E402
 from app.db.init_db import init_db  # noqa: E402

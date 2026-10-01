@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { COMMUNITY_ADMIN_ROUTES, COMMUNITY_ROUTES, useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/stores/auth'
 
 /**
  * 라우트 메타
@@ -22,6 +22,14 @@ const routes = [
     name: 'register',
     component: () => import('@/views/RegisterView.vue'),
     meta: { public: true, layout: 'blank' },
+  },
+  {
+    // 브라우저 기반 DID 플레이어(테스트용). 장치 자격(X-Device-Token)으로
+    // 도는 화면이라 사용자 로그인이 없다 — 접근 통제는 장치 고유번호 인증이다.
+    path: '/player',
+    name: 'player',
+    component: () => import('@/views/PlayerView.vue'),
+    meta: { public: true, layout: 'blank', titleKey: 'player.title' },
   },
   {
     path: '/',
@@ -91,30 +99,47 @@ const routes = [
     meta: { titleKey: 'content.title' },
   },
   {
-    // 커뮤니티 — 상위기관 단위의 공유 공간. 역할 제한이 없다: 어느 커뮤니티를
-    // 보는지는 서버가 소속 기관에서 정하고, 올릴 수 있는지도 서버가 답한다.
-    path: '/community/board',
-    name: 'community-board',
-    component: () => import('@/views/CommunityBoardView.vue'),
-    meta: { titleKey: 'nav.communityBoard' },
+    path: '/admin/schools',
+    name: 'admin-schools',
+    component: () => import('@/views/AdminSchoolsView.vue'),
+    // 관리자 메뉴는 슈퍼관리자의 것이다 — 가드가 meta.roles 로 돌려보낸다.
+    meta: { titleKey: 'nav.adminSchools', roles: ['SUPER_ADMIN'] },
   },
   {
+    // 소속기관 공지 — 기간이 정해진 재생목록 형태의 공지.
+    path: '/org-notices',
+    name: 'org-notices',
+    component: () => import('@/views/OrgNoticesView.vue'),
+    meta: { titleKey: 'nav.orgNotices', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+  },
+  {
+    // 공지 편집기 — 좌(콘텐츠 편집기)/우(재생목록) 분할.
+    path: '/org-notices/:id/editor',
+    name: 'org-notice-editor',
+    component: () => import('@/views/OrgNoticeEditorView.vue'),
+    meta: { titleKey: 'nav.orgNotices', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+  },
+  {
+    path: '/admin/org-types',
+    name: 'admin-org-types',
+    component: () => import('@/views/AdminOrgTypesView.vue'),
+    meta: { titleKey: 'nav.adminOrgTypes', roles: ['SUPER_ADMIN'] },
+  },
+  {
+    // 커뮤니티 — 상위기관 단위의 공유 공간. 역할 제한이 없다: 어느 커뮤니티를
+    // 보는지는 서버가 소속 기관에서 정하고, 올릴 수 있는지도 서버가 답한다.
+    // 개편(2026-09): 게시판·콘텐츠를 걷어내고 재생목록 하나가 커뮤니티다.
     path: '/community/playlists',
     name: 'community-playlists',
     component: () => import('@/views/CommunityPlaylistsView.vue'),
-    meta: { titleKey: 'nav.communityPlaylists' },
+    meta: { titleKey: 'nav.community' },
   },
   {
-    path: '/community/contents',
-    name: 'community-contents',
-    component: () => import('@/views/CommunityContentsView.vue'),
-    meta: { titleKey: 'nav.communityContents' },
-  },
-  {
-    path: '/community/contents/:id/editor',
-    name: 'community-content-editor',
-    component: () => import('@/views/CommunityContentEditorView.vue'),
-    meta: { titleKey: 'community.contentsTitle' },
+    // 등록은 목록 화면의 메타 레이어가 하고(2026-10), 칸 다듬기는 이 편집기다.
+    path: '/community/playlists/:id/edit',
+    name: 'community-playlist-edit',
+    component: () => import('@/views/CommunityPlaylistEditorView.vue'),
+    meta: { titleKey: 'nav.community' },
   },
   {
     path: '/boards',
@@ -151,23 +176,7 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
-  // 커뮤니티 유저는 커뮤니티 바깥으로 나가지 못한다. 대시보드조차 그 사람의
-  // 화면이 아니므로 돌려보낼 곳도 커뮤니티다.
-  if (auth.isCommunityUser && !COMMUNITY_ROUTES.includes(to.name)) {
-    return { name: 'community-board' }
-  }
-
-  // 커뮤니티는 기관관리자와 커뮤니티 유저의 공간이다. 다른 역할은 메뉴도
-  // 없지만, 주소를 쳐도 여기서 돌려보낸다(서버도 403 으로 막는다).
-  if (String(to.name ?? '').startsWith('community') && !auth.can.useCommunity) {
-    return { name: 'dashboard' }
-  }
-
-  // 콘텐츠·재생목록은 관리자의 운영 화면이다.
-  if (COMMUNITY_ADMIN_ROUTES.includes(to.name) && !auth.can.manageCommunity) {
-    return { name: 'community-board' }
-  }
-
+  // 2026-10 개편: 커뮤니티는 모든 승인 사용자의 공간 — 전용 가드가 없다.
   if (to.meta.roles && !auth.hasRole(...to.meta.roles)) {
     return { name: 'dashboard' }
   }

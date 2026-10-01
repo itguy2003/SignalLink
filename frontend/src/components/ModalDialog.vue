@@ -1,6 +1,8 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+import { useDraggableDialog } from '@/composables/useDraggableDialog'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -22,37 +24,25 @@ const emit = defineEmits(['close', 'confirm'])
 const { t } = useI18n()
 const confirmText = computed(() => props.confirmLabel || t('common.save'))
 
-/**
- * 뒷배경을 눌러 닫기.
- *
- * ``@click.self`` 만으로는 부족하다. click 은 mousedown 과 mouseup 의 공통 조상에서
- * 발생하므로, 입력창 안에서 글자를 끌어 선택하다가 창 밖에서 손을 떼면 그 조상이
- * 뒷배경이 되어 창이 닫히고 편집하던 내용이 사라진다.
- *
- * 그래서 **누르기 시작한 곳도 뒷배경일 때만** 닫는다.
- */
-const pressedOnBackdrop = ref(false)
+// 머리글을 잡고 끌면 창이 옮겨진다 — 가린 뒤쪽을 볼 때 닫지 않아도 된다.
+const { dialogStyle, onHandleMouseDown } = useDraggableDialog()
 
-function onBackdropMouseDown(event) {
-  pressedOnBackdrop.value = event.target === event.currentTarget
-}
-
-function onBackdropClick(event) {
-  const shouldClose = pressedOnBackdrop.value && event.target === event.currentTarget
-  pressedOnBackdrop.value = false
-  if (shouldClose) emit('close')
-}
+// 뒷배경을 눌러도 닫지 않는다.
+//
+// 생성·수정 폼이 이 창으로 뜨는데, 무심코 바깥을 누르는 순간 창이 닫히면
+// 적던 내용이 통째로 사라진다 — 실제로 그런 사고가 반복됐다. 닫기는
+// 언제나 명시적인 행동(✕ 또는 취소)으로만 한다.
 </script>
 
 <template>
-  <div class="backdrop" @mousedown="onBackdropMouseDown" @click="onBackdropClick">
+  <div class="backdrop">
     <div
       class="dialog"
-      :style="{ width, height: height || undefined }"
+      :style="{ width, height: height || undefined, ...dialogStyle }"
       role="dialog"
       aria-modal="true"
     >
-      <header class="dialog-head">
+      <header class="dialog-head drag-handle" data-test="drag-handle" @mousedown="onHandleMouseDown">
         <h2>{{ title }}</h2>
         <button class="close" :aria-label="t('common.close')" @click="emit('close')">✕</button>
       </header>
@@ -104,6 +94,12 @@ function onBackdropClick(event) {
 
 .dialog-head h2 {
   font-size: 15px;
+}
+
+/* 끌기 손잡이 — 머리글을 잡고 창을 옮긴다. */
+.drag-handle {
+  cursor: move;
+  user-select: none;
 }
 
 .close {

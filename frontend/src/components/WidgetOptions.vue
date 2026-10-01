@@ -9,9 +9,10 @@
  * 넣고 순서를 바꾸는 일이고, `transition` 은 효과 이름을 **서버가 가진
  * 목록**에서 고르는 일이다. 이 둘만 전용 칸을 그린다.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { api } from '@/api/client'
 import ImageListEditor from '@/components/ImageListEditor.vue'
 import { DEFAULT_TRANSITION, TRANSITION_GROUPS, groupKey, labelKey } from '@/utils/transitions'
 
@@ -60,6 +61,41 @@ function set(option, next) {
   props.element.options[option.key] = next
   emit('change')
 }
+
+/**
+ * 커뮤니티 재생목록 고르기(`community_playlist` 옵션) — 상위기관 커뮤니티의
+ * 재생목록. 편집자가 특정 재생목록을 집어 삽입할 수 있게 한다. 비우면
+ * 서버가 '게시' 상태의 최신 것을 자동으로 고른다.
+ *
+ * 목록은 이 옵션을 가진 위젯을 골랐을 때 한 번만 받아 둔다. 실패(커뮤니티
+ * 없음·권한 밖)해도 조용히 자동 선택만 남긴다 — 편집을 막을 일은 아니다.
+ */
+const communityChoices = ref([])
+const communityLoaded = ref(false)
+
+function communityLabel(playlist) {
+  // 게시 전 것을 고르면 표출되지 않는다 — 상태를 함께 보여 줘야 안 헷갈린다.
+  const status = playlist.publish_status !== '게시' ? ` [${playlist.publish_status}]` : ''
+  return `${playlist.title}${status}`
+}
+
+watch(
+  () => (props.spec?.options ?? []).some((option) => option.type === 'community_playlist'),
+  async (needed) => {
+    if (!needed || communityLoaded.value) return
+    communityLoaded.value = true
+    try {
+      const page = await api.get('/community/playlists', { size: 100 })
+      communityChoices.value = (page.items ?? []).map((playlist) => ({
+        value: playlist.id,
+        label: communityLabel(playlist),
+      }))
+    } catch {
+      communityChoices.value = []
+    }
+  },
+  { immediate: true },
+)
 
 /**
  * 숫자를 명세의 한계 안으로 끌어다 맞춘다.
@@ -122,6 +158,21 @@ function clampNumber(option, raw) {
             {{ t(labelKey(kind)) }}
           </option>
         </optgroup>
+      </select>
+
+      <!-- 상위기관 커뮤니티의 재생목록 중 하나를 집어 삽입한다. 비우면
+           서버가 '게시' 상태의 최신 것을 고른다. -->
+      <select
+        v-else-if="option.type === 'community_playlist'"
+        class="select"
+        data-test="community-playlist"
+        :value="element.options[option.key] ?? ''"
+        @change="set(option, $event.target.value ? Number($event.target.value) : null)"
+      >
+        <option value="">{{ t('canvas.communityAuto') }}</option>
+        <option v-for="choice in communityChoices" :key="choice.value" :value="choice.value">
+          {{ choice.label }}
+        </option>
       </select>
 
       <select

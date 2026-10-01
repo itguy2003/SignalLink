@@ -22,6 +22,8 @@ class OrgBoard(Base, TimestampMixin):
     org_id: Mapped[int] = mapped_column(
         ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    #: 운영자가 알아보는 이름표(예: '본관 공지'). 표시용이다.
+    name: Mapped[str] = mapped_column(String(200), default="", server_default="", nullable=False)
     kind: Mapped[str] = mapped_column(String(20), default=BoardKind.BOARD, nullable=False)
     url: Mapped[str] = mapped_column(String(1000), nullable=False)
     #: 스크래핑방법 (예: "html:table", "rss", "neis-api" 등 수집기 식별자)

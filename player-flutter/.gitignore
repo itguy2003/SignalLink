@@ -1,0 +1,19 @@
+# Flutter/Dart 산출물
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# 플랫폼 셸의 지역 설정
+android/local.properties
+android/.gradle/
+android/**/GeneratedPluginRegistrant.java
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+
+# IDE
+.idea/
+*.iml

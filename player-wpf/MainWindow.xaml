@@ -1,0 +1,73 @@
+<Window x:Class="SignalLink.Player.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="SignalLink Player"
+        Background="Black"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowState="Maximized"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Cursor="None">
+    <!-- 키오스크: 전체화면 + 최상위. 창 틀도 작업표시줄도 없다. 종료는 관리자
+         단축키(Ctrl+Shift+Q)뿐이고, Ctrl+Shift+F 로 테스트용 FHD 창(최상위
+         없음)과 오간다 - 모두 코드비하인드가 받는다. -->
+    <Grid>
+        <wv2:WebView2 x:Name="Web" DefaultBackgroundColor="Black" />
+
+        <!-- 설정: 서버 주소 하나. 장치 고유번호는 웹 플레이어 화면이 받는다. -->
+        <Border Background="#CC000000"
+                Visibility="{Binding SettingsOpen, Converter={StaticResource BoolToVisibility}}">
+            <Border Background="#161B26"
+                    CornerRadius="10"
+                    Padding="28"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="460"
+                    Cursor="Arrow">
+                <StackPanel>
+                    <TextBlock Text="SignalLink 플레이어"
+                               Foreground="White" FontSize="20" FontWeight="Bold" />
+                    <TextBlock Text="CMS 서버 주소를 입력하세요. 장치 고유번호는 다음 화면에서 받습니다."
+                               Foreground="#94A3B8" FontSize="12" Margin="0,6,0,16"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Text="서버 주소" Foreground="#CBD5E1" FontSize="12" Margin="0,0,0,4" />
+                    <TextBox Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="14" Padding="8"
+                             Background="#0B1120" Foreground="White" BorderBrush="#334155" />
+                    <TextBlock Text="예: http://192.168.0.10:5173 또는 https://did.example.org"
+                               Foreground="#64748B" FontSize="11" Margin="0,4,0,0" />
+
+                    <TextBlock Text="장치 고유번호 (선택)" Foreground="#CBD5E1" FontSize="12" Margin="0,14,0,4" />
+                    <TextBox Text="{Binding DeviceCode, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="14" Padding="8" CharacterCasing="Upper"
+                             Background="#0B1120" Foreground="White" BorderBrush="#334155" />
+                    <TextBlock Text="XXXX-XXX-XXX · 비우면 플레이어 화면에서 입력합니다."
+                               Foreground="#64748B" FontSize="11" Margin="0,4,0,0" />
+
+                    <TextBlock Text="마스터 키" Foreground="#CBD5E1" FontSize="12" Margin="0,14,0,4" />
+                    <TextBox Text="{Binding MasterKey, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="14" Padding="8"
+                             Background="#0B1120" Foreground="White" BorderBrush="#334155" />
+                    <TextBlock Text="서버의 DEVICE_MASTER_KEY 와 같은 값이어야 합니다."
+                               Foreground="#64748B" FontSize="11" Margin="0,4,0,0" />
+
+                    <TextBlock Text="{Binding SettingsError}"
+                               Foreground="#F87171" FontSize="12" Margin="0,8,0,0"
+                               TextWrapping="Wrap" />
+
+                    <Button Content="시작"
+                            Command="{Binding SaveSettingsCommand}"
+                            Margin="0,16,0,0" Padding="10"
+                            FontSize="14" FontWeight="Bold"
+                            Background="#2563EB" Foreground="White" BorderThickness="0" />
+
+                    <TextBlock Text="관리: Ctrl+Shift+S 설정 · Ctrl+Shift+F 전체화면/FHD 창 · Ctrl+Shift+Q 종료"
+                               Foreground="#475569" FontSize="11" Margin="0,14,0,0" />
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

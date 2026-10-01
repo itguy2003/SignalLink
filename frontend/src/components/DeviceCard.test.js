@@ -240,13 +240,13 @@ describe('장치 정보', () => {
     expect(wrapper.text()).toContain('오프라인')
   })
 
-  it('스케줄을 빼면 부모에게 알린다', async () => {
-    // 배정은 N:M 이라 '목록 전체'를 넘긴다. 하나만 바꾸는 개념이 없다.
+  it('배정 버튼은 분할 수정 창을 열도록 부모에게 알린다', async () => {
+    // 배정 수정은 카드 안이 아니라 분할 창(DeviceScheduleDialog)에서 한다.
     const wrapper = mountCard()
     await flushPromises()
 
-    await wrapper.find('.schedule-picker .row .btn:last-child').trigger('click')
-    expect(wrapper.emitted('assign')[0][0].scheduleIds).toEqual([])
+    await wrapper.find('[data-test="edit-schedules"]').trigger('click')
+    expect(wrapper.emitted('edit-schedules')[0][0].id).toBe(1)
   })
 
   it('선택 여부를 표시한다', async () => {

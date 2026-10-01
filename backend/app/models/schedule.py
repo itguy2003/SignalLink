@@ -91,20 +91,35 @@ class ScheduleItem(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: 목록반복에서 한 아이템을 표출할 시간(초)
     duration_sec: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    #: **앞 칸에서 이 칸으로** 넘어올 때의 전환 효과(``services/transitions``).
+    #: 재생목록 칸(``PlaylistItem``)과 같은 규약이다.
+    transition: Mapped[str] = mapped_column(
+        String(20), default="none", server_default="none", nullable=False
+    )
+    transition_ms: Mapped[int] = mapped_column(
+        Integer, default=600, server_default="600", nullable=False
+    )
     #: 콘텐츠 라이브러리 참조. 설정되면 ``content`` 대신 이쪽 문서가 표출된다.
     #: 하나의 콘텐츠를 여러 시간대에서 재사용하기 위한 것이다.
     content_id: Mapped[int | None] = mapped_column(
         ForeignKey("content.id", ondelete="SET NULL"), index=True
+    )
+    #: 소속기관 공지 참조. 설정되면 표출 시 공지의 슬라이드 전체로 펼쳐진다.
+    org_notice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("org_notice.id", ondelete="SET NULL"), index=True
     )
     #: 인라인 콘텐츠. ``content_id`` 가 없을 때 사용한다.
     content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     schedule: Mapped[Schedule] = relationship(back_populates="items")
     content_ref: Mapped[Content | None] = relationship(lazy="selectin")
+    notice_ref = relationship("OrgNotice", lazy="selectin")
 
     @property
     def content_name(self) -> str | None:
-        """편집 화면에서 블록에 표시할 이름. 인라인 콘텐츠면 None."""
+        """편집 화면에서 블록에 표시할 이름. 공지 참조가 우선이다."""
+        if self.notice_ref is not None:
+            return self.notice_ref.name
         return self.content_ref.name if self.content_ref is not None else None
 
     @property

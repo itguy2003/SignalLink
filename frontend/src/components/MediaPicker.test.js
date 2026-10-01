@@ -84,10 +84,16 @@ beforeEach(() => {
   ]
 })
 
-describe('네 가지 방법', () => {
-  it('네 가지 방법을 한 자리에 둔다', () => {
+describe('다섯 가지 방법', () => {
+  it('다섯 가지 방법을 한 자리에 둔다', () => {
     const wrapper = mountPicker()
-    expect(tabs(wrapper).map((b) => b.text())).toEqual(['업로드', '라이브러리', '검색', '링크'])
+    expect(tabs(wrapper).map((b) => b.text())).toEqual([
+      '업로드',
+      '라이브러리',
+      '검색',
+      'Canva',
+      '링크',
+    ])
   })
 
   it('업로드부터 연다', () => {
@@ -200,7 +206,7 @@ describe('라이브러리', () => {
 describe('링크', () => {
   it('넣은 주소를 그대로 올린다', async () => {
     const wrapper = mountPicker()
-    await openTab(wrapper, 3)
+    await openTab(wrapper, 4)
 
     await wrapper.find('.field .input').setValue('https://cdn.example.com/a.png')
     await wrapper.find('.btn-primary').trigger('click')
@@ -211,14 +217,14 @@ describe('링크', () => {
   it('지금 주소를 채워 연다', async () => {
     // 고치려던 사람이 처음부터 다시 적게 하면 안 된다.
     const wrapper = mountPicker({ current: 'https://old.example.com/a.png' })
-    await openTab(wrapper, 3)
+    await openTab(wrapper, 4)
 
     expect(wrapper.find('.field .input').element.value).toBe('https://old.example.com/a.png')
   })
 
   it('비었으면 쓸 수 없다', async () => {
     const wrapper = mountPicker()
-    await openTab(wrapper, 3)
+    await openTab(wrapper, 4)
 
     expect(wrapper.find('.btn-primary').attributes('disabled')).toBeDefined()
   })
@@ -226,7 +232,7 @@ describe('링크', () => {
   it('폐쇄망 경고를 함께 띄운다', async () => {
     // 링크 방식에서 가장 흔한 사고다.
     const wrapper = mountPicker()
-    await openTab(wrapper, 3)
+    await openTab(wrapper, 4)
 
     expect(wrapper.text()).toContain('폐쇄망')
   })

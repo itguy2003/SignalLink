@@ -33,7 +33,7 @@ const { t } = useI18n()
 
 // 재생목록은 여기 두지 않는다 — '어느 목록인가' 가 정해져야 의미가 있어
 // 아래에 따로 묶는다.
-const BASIC = ['text', 'image', 'video', 'web']
+const BASIC = ['text', 'image', 'video', 'web', 'qrcode']
 
 const widgetGroups = computed(() => {
   const groups = {}
@@ -49,6 +49,7 @@ function basicLabel(type) {
     image: 'canvas.elementImage',
     video: 'canvas.elementVideo',
     web: 'canvas.elementWeb',
+    qrcode: 'canvas.elementQr',
   }
   return t(map[type])
 }

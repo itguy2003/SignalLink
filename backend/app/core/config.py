@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
 
     SECRET_KEY: str = "dev-secret-key-change-me"
+    #: 비밀번호 복잡도 검사 — on / off / auto. auto 는 운영 DB(PostgreSQL)일 때만
+    #: 켠다. 개발·시연은 외우기 쉬운 계정으로 돌아가야 한다.
+    PASSWORD_COMPLEXITY: str = "auto"
     DEVICE_MASTER_KEY: str = "dev-device-master-key-change-me"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
@@ -46,6 +49,12 @@ class Settings(BaseSettings):
     PIXABAY_API_KEY: str = ""
     PIXABAY_TIMEOUT_SEC: float = 10.0
 
+    # Canva Connect 연동 — 비우면 기능이 꺼진다(설정 안 됨 안내).
+    CANVA_CLIENT_ID: str = ""
+    CANVA_CLIENT_SECRET: str = ""
+    CANVA_REDIRECT_URI: str = ""
+
+
     # 업로드한 이미지·동영상을 두는 곳. 상대 경로면 backend/ 아래로 잡는다.
     #
     # DB 가 아니라 파일 시스템에 두는 이유는 영상 때문이다 — DB 블롭은 한 번
@@ -53,9 +62,9 @@ class Settings(BaseSettings):
     # 공유 스토리지(NFS 등)를 이 경로에 붙이면 된다.
     MEDIA_ROOT: str = "media"
     MAX_IMAGE_BYTES: int = 200 * 1024 * 1024
-    #: 동영상 상한 10GB. 이 크기부터는 통째로 메모리에 올리면 서버가 먼저
-    #: 쓰러진다 — 업로드는 조각으로 받아 쓴다(``services/assets.store_stream``).
-    MAX_VIDEO_BYTES: int = 10 * 1024 * 1024 * 1024
+    #: 동영상 상한 100MB — DID 표출용 클립 기준. 업로드는 조각으로 받아
+    #: 쓰므로(``services/assets.store_stream``) 넘치면 그 자리에서 거절한다.
+    MAX_VIDEO_BYTES: int = 100 * 1024 * 1024
 
     @property
     def BACKEND_DIR(self) -> str:  # noqa: N802 - 설정 값처럼 쓰이는 경로다

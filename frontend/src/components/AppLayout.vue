@@ -7,8 +7,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { TEST_MODE } from '@/api/client'
 import ActivityBar from '@/components/ActivityBar.vue'
 import ProfileDialog from '@/components/ProfileDialog.vue'
+import CommunityNoticePopup from '@/components/CommunityNoticePopup.vue'
 import { SUPPORTED_LOCALES } from '@/i18n'
-import { COMMUNITY_ROUTES, useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 
 const auth = useAuthStore()
@@ -19,48 +20,88 @@ const { t } = useI18n()
 
 const NAV = [
   { to: '/', key: 'dashboard', icon: '▤' },
-  { to: '/organizations', key: 'organizations', icon: '🏛', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
-  { to: '/users', key: 'users', icon: '👥', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
-  { to: '/devices', key: 'devices', icon: '🖥' },
-  { to: '/schedules', key: 'schedules', icon: '🗓' },
-  // 재생목록을 콘텐츠보다 앞에 둔다 — 재생목록은 콘텐츠 편집기에서 가져다
-  // 쓰는 재료라, 만드는 순서가 곧 이 순서다.
-  { to: '/playlists', key: 'playlists', icon: '🔁' },
-  { to: '/contents', key: 'contents', icon: '🎬' },
-  { to: '/boards', key: 'boards', icon: '📰', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
   {
-    // 커뮤니티는 상위기관 단위의 공유 공간 — 기관관리자와 커뮤니티 유저의
-    // 것이다. 어느 커뮤니티를 보는지는 서버가 소속 기관에서 정한다.
-    // 콘텐츠·재생목록은 관리자의 운영 화면이라 adminOnly 로 가른다.
-    key: 'community',
-    icon: '🤝',
-    // 공유 이미지·동영상 메뉴는 게시판으로 합쳤다 — 글에 붙인 파일이
-    // 곧 공유 재료다(콘텐츠·재생목록이 가져다 쓴다).
+    // 시스템 운영 메뉴 — 대시보드 바로 아래, 접을 수 있다. 그룹 전체가
+    // 아니라 칸마다 권한이 다르다: 기관 관리는 기관관리자도, 학교·기관구분
+    // 관리는 슈퍼관리자만. 보이는 칸이 하나도 없으면 그룹째 사라진다.
+    key: 'admin',
+    icon: '🛠',
     children: [
-      { to: '/community/board', key: 'communityBoard', icon: '💬' },
-      { to: '/community/playlists', key: 'communityPlaylists', icon: '🔁', adminOnly: true },
-      { to: '/community/contents', key: 'communityContents', icon: '🎞', adminOnly: true },
+      { to: '/admin/schools', key: 'adminSchools', icon: '🏫', roles: ['SUPER_ADMIN'] },
+      { to: '/admin/org-types', key: 'adminOrgTypes', icon: '🏷️', roles: ['SUPER_ADMIN'] },
+      {
+        to: '/organizations',
+        key: 'organizations',
+        icon: '🏛',
+        roles: ['SUPER_ADMIN', 'ORG_ADMIN'],
+      },
+      { to: '/users', key: 'users', icon: '👥', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
     ],
   },
+  { to: '/devices', key: 'devices', icon: '🖥' },
+  { to: '/schedules', key: 'schedules', icon: '🗓' },
+  {
+    // 콘텐츠 관리 — 표출 재료를 다루는 메뉴들을 한 그룹으로 묶는다.
+    // 기관 게시판(수집 데이터)은 관리자만 본다.
+    key: 'contentGroup',
+    icon: '🎬',
+    children: [
+      { to: '/boards', key: 'boards', icon: '📰', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+      // 소속기관 공지 — 자리만 열어 둔 메뉴(기능은 아직 없다).
+      { to: '/org-notices', key: 'orgNotices', icon: '📢', roles: ['SUPER_ADMIN', 'ORG_ADMIN'] },
+      { to: '/contents', key: 'contents', icon: '🎬' },
+      { to: '/playlists', key: 'playlists', icon: '🔁' },
+    ],
+  },
+  // 커뮤니티는 상위기관 단위의 공유 공간 — 모든 승인 사용자의 것이다
+  // (2026-10 개편). 어느 커뮤니티를 보는지는 서버가 소속 기관에서 정한다.
+  // 화면이 하나뿐이라 서브 메뉴 없이 최상위에 둔다.
+  { to: '/community/playlists', key: 'community', icon: '🤝' },
 ]
 
 // 역할에 따라 메뉴 자체를 감춘다. 서버도 같은 규칙으로 다시 막는다.
 const menu = computed(() => {
-  // 커뮤니티 그룹의 서브 메뉴: 관리자 전용 칸(콘텐츠·재생목록)을 가른다.
-  const communityGroup = (group) => ({
-    ...group,
-    children: group.children.filter((child) => !child.adminOnly || auth.can.manageCommunity),
-  })
+  // 그룹의 서브 메뉴는 칸마다 가른다: 역할 제한(roles)과 커뮤니티의
+  // 관리자 전용 칸(adminOnly). 남는 칸이 없으면 그룹째 감춘다.
+  const visibleChild = (child) =>
+    (!child.roles || auth.hasRole(...child.roles)) &&
+    (!child.adminOnly || auth.can.manageCommunity)
+  const withChildren = (group) => ({ ...group, children: group.children.filter(visibleChild) })
 
-  // 커뮤니티 유저에게는 커뮤니티 그룹만 남긴다. 나머지는 눌러도 서버가
-  // 막지만, 눌리는 것 자체가 '내 것인가' 를 헷갈리게 한다.
-  if (auth.isCommunityUser) {
-    return NAV.filter((item) => item.key === 'community').map(communityGroup)
-  }
   return NAV.filter((item) => !item.roles || auth.hasRole(...item.roles))
-    .filter((item) => item.key !== 'community' || auth.can.useCommunity)
-    .map((item) => (item.key === 'community' ? communityGroup(item) : item))
+    .map((item) => (item.children ? withChildren(item) : item))
+    .filter((item) => !item.children || item.children.length > 0)
 })
+
+/**
+ * 접힌 그룹들. 접힘은 취향이라 브라우저에 남긴다 — 저장이 안 되는
+ * 환경이어도 접기 자체는 동작한다.
+ */
+const NAV_COLLAPSE_KEY = 'signallink.nav-collapsed'
+
+function readCollapsedGroups() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(NAV_COLLAPSE_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw : []
+  } catch {
+    return []
+  }
+}
+
+const collapsedGroups = ref(readCollapsedGroups())
+
+const isGroupCollapsed = (key) => collapsedGroups.value.includes(key)
+
+function toggleGroup(key) {
+  collapsedGroups.value = isGroupCollapsed(key)
+    ? collapsedGroups.value.filter((item) => item !== key)
+    : [...collapsedGroups.value, key]
+  try {
+    localStorage.setItem(NAV_COLLAPSE_KEY, JSON.stringify(collapsedGroups.value))
+  } catch {
+    // 저장 실패는 무시 — 이번 화면에서는 이미 접혀 있다.
+  }
+}
 
 const primaryRole = computed(() => {
   const order = ['SUPER_ADMIN', 'ORG_ADMIN', 'DEVICE_MANAGER', 'HOMEROOM_TEACHER', 'MEMBER']
@@ -95,25 +136,37 @@ function logout() {
 
       <nav class="nav">
         <template v-for="item in menu" :key="item.key">
-          <!-- 서브 메뉴가 있는 그룹. 머리글은 누르는 곳이 아니라 이름표다. -->
+          <!-- 서브 메뉴가 있는 그룹. 머리글을 누르면 접었다 편다.
+               아이콘만 남긴 사이드바에서는 머리글이 없으므로 늘 편 상태다. -->
           <template v-if="item.children">
-            <div v-if="!settings.sidebarCollapsed" class="nav-group">
+            <button
+              v-if="!settings.sidebarCollapsed"
+              class="nav-group"
+              :data-test="`group-${item.key}`"
+              :aria-expanded="String(!isGroupCollapsed(item.key))"
+              @click="toggleGroup(item.key)"
+            >
               <span class="nav-icon">{{ item.icon }}</span>
               <span class="nav-label">{{ t(`nav.${item.key}`) }}</span>
-            </div>
-            <RouterLink
-              v-for="child in item.children"
-              :key="child.to"
-              :to="child.to"
-              class="nav-item"
-              :class="{ sub: !settings.sidebarCollapsed, active: isActive(child) }"
-              :title="settings.sidebarCollapsed ? t(`nav.${child.key}`) : null"
-            >
-              <span class="nav-icon">{{ child.icon }}</span>
-              <span v-if="!settings.sidebarCollapsed" class="nav-label">
-                {{ t(`nav.${child.key}`) }}
+              <span class="group-chevron" aria-hidden="true">
+                {{ isGroupCollapsed(item.key) ? '▸' : '▾' }}
               </span>
-            </RouterLink>
+            </button>
+            <template v-if="settings.sidebarCollapsed || !isGroupCollapsed(item.key)">
+              <RouterLink
+                v-for="child in item.children"
+                :key="child.to"
+                :to="child.to"
+                class="nav-item"
+                :class="{ sub: !settings.sidebarCollapsed, active: isActive(child) }"
+                :title="settings.sidebarCollapsed ? t(`nav.${child.key}`) : null"
+              >
+                <span class="nav-icon">{{ child.icon }}</span>
+                <span v-if="!settings.sidebarCollapsed" class="nav-label">
+                  {{ t(`nav.${child.key}`) }}
+                </span>
+              </RouterLink>
+            </template>
           </template>
 
           <RouterLink
@@ -208,6 +261,9 @@ function logout() {
         <slot />
       </main>
     </div>
+
+    <!-- 로그인 직후, 내 기관이 공지대상에 들고 기간 안인 '게시' 글을 알린다. -->
+    <CommunityNoticePopup />
   </div>
 </template>
 
@@ -279,17 +335,34 @@ function logout() {
   gap: 2px;
 }
 
-/* 그룹 머리글. 누르는 곳이 아니라 이름표라 흐리게 둔다. */
+/* 그룹 머리글 — 접기/펼치기 스위치. 이름표처럼 흐리게 두되 눌린다는
+   표시는 화살표와 hover 가 한다. */
 .nav-group {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   margin-top: 6px;
   padding: 6px 14px 2px;
-  color: var(--text-muted);
-  font-size: 11px;
+  border: 0;
+  background: none;
+  /* 서브 메뉴(.nav-item)와 같은 색·크기로 — 머리글만 다르면 급이 달라 보인다. */
+  color: var(--sidebar-text);
+  font-family: inherit;
+  font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-group:hover {
+  color: var(--sidebar-text-strong);
+}
+
+.group-chevron {
+  margin-left: auto;
+  font-size: 10px;
 }
 
 /* 서브 메뉴는 그룹 아래로 들여 세운다. 접힌 상태에서는 들일 곳이 없다. */

@@ -15,6 +15,7 @@ import { useI18n } from 'vue-i18n'
 
 import { api } from '@/api/client'
 import ContentBrowser from '@/components/ContentBrowser.vue'
+import ModalDialog from '@/components/ModalDialog.vue'
 import ContentLibraryPanel from '@/components/ContentLibraryPanel.vue'
 import SchedulePlaylist from '@/components/SchedulePlaylist.vue'
 import SchedulePreview from '@/components/SchedulePreview.vue'
@@ -347,6 +348,53 @@ function closeBrowser() {
   playlistTarget.value = null
 }
 
+// ------------------------------------------------------------ 소속기관 공지 담기
+// 공지는 기간이 정해진 재생목록이다. 여기서는 **담는 순간의 슬라이드 사본**을
+// 아이템으로 붙인다 — 공지를 나중에 고쳐도 이 스케줄은 따라 바뀌지 않는다.
+const noticePickerOpen = ref(false)
+const notices = ref([])
+const noticesLoading = ref(false)
+
+async function openNoticePicker() {
+  noticePickerOpen.value = true
+  noticesLoading.value = true
+  try {
+    notices.value = await api.get('/org-notices', { for_org: schedule.value.org_id })
+  } catch {
+    notices.value = []
+  } finally {
+    noticesLoading.value = false
+  }
+}
+
+function addNotice(notice) {
+  // 사본이 아니라 **참조** 한 줄 — 표출 시 서버가 슬라이드 전체로 펼친다.
+  playlist.value.push({
+    id: null,
+    schedule_id: schedule.value.id,
+    day_of_week: -1,
+    start_time: null,
+    end_time: null,
+    sort_order: playlist.value.length,
+    duration_sec: 10,
+    transition: 'none',
+    transition_ms: 600,
+    org_notice_id: notice.id,
+    content_id: null,
+    content_name: notice.name,
+    content: {},
+  })
+  noticePickerOpen.value = false
+  markDirty()
+  toast.success(t('grid.noticeLinked', { name: notice.name }))
+}
+
+function noticePeriod(notice) {
+  if (!notice.start_date && !notice.end_date) return t('orgNotice.always')
+  const pretty = (value) => (value ?? '').replace('T', ' ')
+  return `${pretty(notice.start_date)} ~ ${pretty(notice.end_date)}`
+}
+
 function applyToPlaylist(content) {
   if (playlistTarget.value === null) {
     playlist.value.push({
@@ -357,6 +405,8 @@ function applyToPlaylist(content) {
       end_time: null,
       sort_order: playlist.value.length,
       duration_sec: 15,
+      transition: 'none',
+      transition_ms: 600,
       content_id: content.id,
       content_name: content.name,
       content: {},
@@ -383,6 +433,7 @@ function applyContent(content) {
   if (block) {
     block.contentId = content.id
     block.contentName = content.name
+    block.noticeId = null
     block.inlineContent = null
     block.hasInline = false
     markDirty()
@@ -559,129 +610,44 @@ function moveToDay(block, day) {
 const dropDay = ref(null)
 const libraryRef = ref(null)
 
-/**
- * 감싼 콘텐츠를 찾는 열쇠. 방향까지 넣는 이유는 가로형과 세로형이 서로 다른
- * 콘텐츠이기 때문이다.
- */
-function wrapKey(payload) {
-  const what = payload.kind === 'playlist' ? `playlist:${payload.id}` : `widget:${payload.key}`
-  return `${what}:${orientation.value}`
-}
-
-/** 이번 편집 중에 만든 것. 한 번 만들면 그 세션 안에서는 다시 묻지 않는다. */
-const wrapCache = new Map()
-
-/** 문서가 '이것 하나로 꽉 찬' 모양인가. */
-function wrapsExactly(document, payload) {
-  const elements = document?.elements ?? []
-  if (elements.length !== 1) return false
-  const element = elements[0]
-  return payload.kind === 'playlist'
-    ? element.type === 'playlist' && element.options?.playlist_id === payload.id
-    : element.type === 'widget' && element.widget_key === payload.key
-}
-
-/**
- * 이미 만들어 둔 감싼 콘텐츠 찾기.
- *
- * 이름이 같고 요소가 하나뿐인 후보만 골라 문서를 확인한다 — 목록 응답에는
- * 문서가 없어서 확인하려면 한 건씩 받아야 하고, 후보를 좁히지 않으면 드롭
- * 한 번에 수십 건을 받게 된다.
- */
-async function findWrapped(payload, size) {
-  const cached = wrapCache.get(wrapKey(payload))
-  if (cached) return cached
-
-  try {
-    const page = await api.get('/contents', {
-      q: payload.name,
-      org_id: schedule.value.org_id,
-      size: 20,
-    })
-    const candidates = (page?.items ?? []).filter(
-      (item) =>
-        item.name === payload.name &&
-        item.element_count === 1 &&
-        item.width === size.width &&
-        item.height === size.height,
-    )
-
-    for (const candidate of candidates.slice(0, 5)) {
-      const detail = await api.get(`/contents/${candidate.id}`)
-      if (wrapsExactly(detail.document, payload)) {
-        const found = { id: candidate.id, name: candidate.name }
-        wrapCache.set(wrapKey(payload), found)
-        return found
-      }
-    }
-  } catch {
-    // 못 찾으면 새로 만든다. 재사용은 편의일 뿐, 실패해도 흐름은 이어진다.
-  }
-  return null
-}
-
-/**
- * 떨어뜨린 카드를 '붙일 수 있는 콘텐츠' 로 바꾼다.
- *
- * 콘텐츠 카드는 그대로 쓰고, 위젯·재생목록 카드는 그것 하나가 화면을 꽉
- * 채우는 콘텐츠로 바꿔 돌려준다. 스케줄 아이템은 언제나 콘텐츠를 가리키므로,
- * 이 지점에서 형태를 맞춰 두면 이후 편집·재사용 경로가 완전히 같아진다.
- *
- * **같은 것을 다시 놓으면 이미 만들어 둔 콘텐츠를 다시 쓴다.** 놓을 때마다
- * 새로 만들면 똑같은 콘텐츠가 라이브러리에 쌓이고, 나중에 그 위젯의 설정을
- * 고치려면 몇 벌인지도 모르는 사본을 전부 찾아 고쳐야 한다.
- */
 async function resolveDropped(payload) {
-  const wrapping = payload.kind === 'widget' || payload.kind === 'playlist'
-  if (!wrapping) {
-    // 방향이 다른 콘텐츠는 서버가 거부한다. 여기서 먼저 막아야 왜 안 되는지 알 수 있다.
-    if (typeof payload.width === 'number' && typeof payload.height === 'number') {
-      const actual = ofSize(payload.width, payload.height)
-      if (actual !== orientation.value) {
-        toast.error(
-          t('grid.orientationMismatch', {
-            name: payload.name,
-            schedule: t(labelKey(orientation.value)),
-            content: t(labelKey(actual)),
-          }),
-        )
-        return null
-      }
-    }
-    return payload
+  // 위젯·재생목록은 라이브러리 콘텐츠를 만들지 않는다. 스케줄 아이템이
+  // 인라인 문서를 직접 들 수 있으므로, 스케줄에 넣었다는 이유만으로 콘텐츠
+  // 목록에 등록되는 부작용을 없앤다. 스케줄 방향에 맞춰 감싼다 — 카드가
+  // 실어 온 크기를 그대로 믿으면 방향이 어긋난 문서가 남는다.
+  // 소속기관 공지: **참조**로 담는다 — 표출 시 서버가 슬라이드 전체로
+  // 펼치고, 공지를 고치면 스케줄 버전이 올라 자동 반영된다.
+  if (payload.kind === 'org-notice') {
+    return { id: null, name: payload.name, noticeId: payload.id }
   }
 
-  // 스케줄 방향에 맞춰 감싼다. 카드가 실어 온 크기를 그대로 믿지 않는 이유는,
-  // 방향이 어긋난 콘텐츠를 만들어 두면 쓰이지 못한 채 남기 때문이다.
-  const size = defaultSize(orientation.value)
-
-  const reused = await findWrapped(payload, size)
-  if (reused) return reused
-
-  try {
-    const created = await api.post('/contents', {
+  if (payload.kind === 'widget' || payload.kind === 'playlist') {
+    const size = defaultSize(orientation.value)
+    return {
+      id: null,
       name: payload.name,
-      org_id: schedule.value.org_id,
-      ...size,
-      document:
+      inline:
         payload.kind === 'playlist'
           ? wrapPlaylistAsDocument(payload, size)
           : wrapWidgetAsDocument(payload.key, size),
-    })
-    wrapCache.set(wrapKey(payload), { id: created.id, name: created.name })
-    // 새로 만든 콘텐츠가 왼쪽 목록에도 바로 보이게 한다.
-    libraryRef.value?.reload?.()
-    toast.push(
-      t(payload.kind === 'playlist' ? 'library.playlistWrapped' : 'library.widgetWrapped', {
-        name: created.name,
-      }),
-      'info',
-    )
-    return { id: created.id, name: created.name }
-  } catch (err) {
-    toast.error(err.detail ?? t('content.createFailed'))
-    return null
+    }
   }
+
+  // 방향이 다른 콘텐츠는 서버가 거부한다. 여기서 먼저 막아야 왜 안 되는지 알 수 있다.
+  if (typeof payload.width === 'number' && typeof payload.height === 'number') {
+    const actual = ofSize(payload.width, payload.height)
+    if (actual !== orientation.value) {
+      toast.error(
+        t('grid.orientationMismatch', {
+          name: payload.name,
+          schedule: t(labelKey(orientation.value)),
+          content: t(labelKey(actual)),
+        }),
+      )
+      return null
+    }
+  }
+  return payload
 }
 
 function onColumnDragOver(event, day) {
@@ -725,6 +691,11 @@ async function onColumnDrop(event, day) {
 
   block.contentId = content.id
   block.contentName = content.name
+  block.noticeId = content.noticeId ?? null
+  if (content.inline) {
+    block.inlineContent = content.inline
+    block.hasInline = true
+  }
   blocks.value.push(block)
   selectedKey.value = block.key
   markDirty()
@@ -753,10 +724,13 @@ async function onPlaylistDrop({ event, index }) {
     start_time: null,
     end_time: null,
     sort_order: 0,
-    duration_sec: 15,
+    duration_sec: content.durationSec ?? 15,
+    transition: 'none',
+    transition_ms: 600,
+    org_notice_id: content.noticeId ?? null,
     content_id: content.id,
     content_name: content.name,
-    content: {},
+    content: content.inline ?? {},
   }
   if (index === null || index >= playlist.value.length) playlist.value.push(item)
   else playlist.value.splice(index, 0, item)
@@ -778,14 +752,19 @@ function playlistToItems() {
     end_time: item.end_time ?? null,
     sort_order: index,
     duration_sec: item.duration_sec ?? 10,
-    content_id: item.content_id ?? null,
-    content: item.content_id ? {} : (item.content ?? {}),
+    transition: item.transition ?? 'none',
+    transition_ms: item.transition_ms ?? 600,
+    org_notice_id: item.org_notice_id ?? null,
+    content_id: item.org_notice_id ? null : (item.content_id ?? null),
+    content: item.org_notice_id || item.content_id ? {} : (item.content ?? {}),
   }))
 }
 
 async function save() {
   const empty = isLoop.value
-    ? playlist.value.filter((item) => !item.content_id).length
+    ? playlist.value.filter(
+        (item) => !item.content_id && !(item.content?.elements?.length),
+      ).length
     : emptyBlockCount.value
   if (empty && !confirm(t('grid.confirmEmptyBlocks', { count: empty }))) {
     return
@@ -905,7 +884,9 @@ function draftStyle() {
         @pick="openPlaylistBrowser"
         @edit="openContentEditor"
         @drop-content="onPlaylistDrop"
+        @pick-notice="openNoticePicker"
       />
+
 
       <div v-else class="board">
         <section class="card grid-card">
@@ -1104,6 +1085,41 @@ function draftStyle() {
       :show-groups="!isLoop"
       @close="previewOpen = false"
     />
+
+    <!-- 소속기관 공지 선택 — 슬라이드를 지금 모습대로 복사해 담는다. -->
+    <ModalDialog
+      v-if="noticePickerOpen"
+      :title="t('grid.noticePicker')"
+      width="520px"
+      hide-footer
+      @close="noticePickerOpen = false"
+      >
+      <p v-if="noticesLoading" class="muted">{{ t('common.loading') }}</p>
+      <p v-else-if="notices.length === 0" class="muted">{{ t('grid.noticeEmpty') }}</p>
+      <ul v-else class="notice-list">
+      <li
+          v-for="notice in notices"
+          :key="notice.id"
+          class="notice-row"
+          data-test="notice-row"
+        >
+        <div class="body">
+          <div class="name">
+            {{ notice.name }}
+            <!-- 상위기관이 내린 공지는 어느 기관 것인지 보여야 고를 수 있다. -->
+            <span v-if="notice.org_name" class="badge badge-muted">{{ notice.org_name }}</span>
+          </div>
+          <div class="muted small">
+            {{ noticePeriod(notice) }} ·
+            {{ t('orgNotice.itemCount', { count: notice.item_count }) }}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-primary" @click="addNotice(notice)">
+            {{ t('grid.noticeAddThis') }}
+        </button>
+      </li>
+      </ul>
+    </ModalDialog>
 
     <ContentBrowser
       v-if="browserOpen"
@@ -1383,5 +1399,38 @@ function draftStyle() {
 /* 잘못된 값이 들어간 칸. 어느 칸을 고쳐야 하는지 눈으로 짚어 준다. */
 .input.bad {
   border-color: var(--danger);
+}
+
+/* 소속기관 공지 선택 목록. */
+.notice-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.notice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.notice-row .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-row .name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.notice-row .small {
+  font-size: 12px;
 }
 </style>

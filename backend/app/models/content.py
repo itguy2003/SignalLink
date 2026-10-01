@@ -47,6 +47,13 @@ class Content(Base, TimestampMixin):
     height: Mapped[int] = mapped_column(Integer, default=1080, nullable=False)
     #: ContentDocument 형식의 JSON
     document: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: 공유 구분: '없음' | '동일기관' | '소속기관'(같은 상위기관 아래 기관들) | '전체'.
+    #: 관리 범위 밖의 사용자에게 콘텐츠를 열어 주는 유일한 통로다
+    #: (``services/permissions.content_shared_with``). 열 추가는 EF 마이그레이션
+    #: (backend-dotnet, 20260910160659_ContentShareScope)이 했고 이 정의는 거울이다.
+    share_scope: Mapped[str] = mapped_column(
+        String(10), default="없음", server_default="없음", nullable=False
+    )
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     organization: Mapped[Organization] = relationship()

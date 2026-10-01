@@ -99,23 +99,28 @@ describe('메뉴 표시 제어', () => {
     expect(wrapper.find('.sidebar').exists()).toBe(true)
   })
 
-  it('만드는 순서대로 늘어놓는다', () => {
+  it('만드는 순서대로 늘어놓는다 — 대시보드 아래에 관리자 그룹', () => {
     // 재생목록은 콘텐츠 편집기에서 가져다 쓰는 재료라 콘텐츠보다 앞에 온다.
     const wrapper = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN', 'SUPER_ADMIN'] })
     expect(wrapper.findAll('.nav-label').map((n) => n.text())).toEqual([
       '대시보드',
+      // 관리자 그룹: 머리글 + 학교 정보 관리 + 기관구분 관리 + 기관 관리
+      // + 사용자 관리.
+      '관리자',
+      '학교 정보 관리',
+      '기관구분 관리',
       '기관 관리',
       '사용자 관리',
       '장치 관리',
       '스케줄 관리',
-      '재생목록',
-      '콘텐츠',
+      // 콘텐츠 관리 그룹: 머리글 + 기관 게시판·소속기관 공지·콘텐츠·재생목록.
+      '콘텐츠 관리',
       '기관 게시판',
-      // 커뮤니티 그룹: 머리글 + 게시판·재생목록·콘텐츠.
+      '소속기관 공지',
+      '콘텐츠',
+      '재생목록',
+      // 커뮤니티 — 화면이 하나뿐이라 서브 메뉴 없는 최상위 항목.
       '커뮤니티',
-      '공유 게시판',
-      '공유 재생목록',
-      '커뮤니티 콘텐츠',
     ])
   })
 
@@ -190,29 +195,81 @@ describe('언어 전환', () => {
   })
 })
 
-describe('커뮤니티 메뉴', () => {
-  it('관리자에게는 서브 메뉴 세 칸이 그룹 아래 들여 선다', () => {
-    const wrapper = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN'] })
+describe('관리자 메뉴', () => {
+  it('칸마다 권한이 다르다 — 기관관리자에게는 기관 관리만 남는다', () => {
+    const admin = mountLayout({ roles: ['MEMBER', 'SUPER_ADMIN'] })
+    const adminLabels = admin.findAll('.nav-label').map((n) => n.text())
+    expect(adminLabels).toContain('학교 정보 관리')
+    expect(adminLabels).toContain('기관구분 관리')
 
-    expect(wrapper.findAll('.nav-item.sub')).toHaveLength(3)
-    expect(wrapper.find('.nav-group').text()).toContain('커뮤니티')
+    const orgAdmin = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN'] })
+    const orgLabels = orgAdmin.findAll('.nav-label').map((n) => n.text())
+    expect(orgLabels).toContain('관리자')
+    expect(orgLabels).toContain('기관 관리')
+    expect(orgLabels).not.toContain('학교 정보 관리')
   })
 
-  it('일반 회원에게는 보이지 않는다', () => {
-    // 커뮤니티는 기관관리자와 커뮤니티 유저의 공간이다. 서버도 403 으로 막는다.
+  it('보이는 칸이 없으면 그룹째 사라진다', () => {
+    const member = mountLayout({ roles: ['MEMBER'] })
+    expect(member.findAll('.nav-label').map((n) => n.text())).not.toContain('관리자')
+  })
+})
+
+describe('그룹 접기', () => {
+  it('머리글을 누르면 서브 메뉴가 접히고, 다시 누르면 펴진다', async () => {
+    const wrapper = mountLayout({ roles: ['MEMBER', 'SUPER_ADMIN'] })
+    const labels = () => wrapper.findAll('.nav-label').map((n) => n.text())
+    expect(labels()).toContain('학교 정보 관리')
+
+    await wrapper.find('[data-test="group-admin"]').trigger('click')
+    expect(labels()).not.toContain('학교 정보 관리')
+    expect(labels()).toContain('관리자') // 머리글은 남는다 — 다시 펼 곳이다.
+
+    await wrapper.find('[data-test="group-admin"]').trigger('click')
+    expect(labels()).toContain('학교 정보 관리')
+  })
+
+  it('접힘은 그룹마다 따로다', async () => {
+    const wrapper = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN', 'SUPER_ADMIN'] })
+    await wrapper.find('[data-test="group-admin"]').trigger('click')
+
+    const labels = wrapper.findAll('.nav-label').map((n) => n.text())
+    expect(labels).not.toContain('기관 관리')
+    expect(labels).toContain('커뮤니티') // 다른 메뉴는 그대로.
+  })
+
+  it('접힘 상태를 기억해 새로 그려도 유지한다', async () => {
+    const first = mountLayout({ roles: ['MEMBER', 'SUPER_ADMIN'] })
+    await first.find('[data-test="group-admin"]').trigger('click')
+
+    const second = mountLayout({ roles: ['MEMBER', 'SUPER_ADMIN'] })
+    expect(second.findAll('.nav-label').map((n) => n.text())).not.toContain('학교 정보 관리')
+  })
+
+  it('아이콘만 남긴 사이드바에서는 접힘과 무관하게 아이콘이 보인다', async () => {
+    // 머리글이 없어 다시 펼 방법이 없으므로, 이 상태에서는 늘 편다.
+    const wrapper = mountLayout({ roles: ['MEMBER', 'SUPER_ADMIN'] })
+    await wrapper.find('[data-test="group-admin"]').trigger('click')
+    await wrapper.find('.rail-btn').trigger('click')
+
+    const titles = wrapper.findAll('.nav-item').map((item) => item.attributes('title'))
+    expect(titles).toContain('학교 정보 관리')
+  })
+})
+
+describe('커뮤니티 메뉴', () => {
+  it('서브 메뉴 없는 최상위 항목이다', () => {
+    const wrapper = mountLayout({ roles: ['MEMBER', 'ORG_ADMIN'] })
+
+    // 관리자 2칸 + 콘텐츠 관리 4칸 — 커뮤니티는 그룹이 아니라 서브가 없다.
+    expect(wrapper.findAll('.nav-item.sub')).toHaveLength(6)
+    expect(wrapper.findAll('.nav-label').map((n) => n.text())).toContain('커뮤니티')
+  })
+
+  it('일반 회원에게도 보인다 — 커뮤니티는 모두의 공간이다(2026-10 개편)', () => {
     const wrapper = mountLayout({ roles: ['MEMBER'] })
     const labels = wrapper.findAll('.nav-label').map((n) => n.text())
 
-    expect(labels).not.toContain('커뮤니티')
-    expect(labels).not.toContain('공유 게시판')
-  })
-
-  it('커뮤니티 유저에게는 게시판 하나만 남는다', () => {
-    // 이미지·동영상은 게시판으로 합쳐졌고, 콘텐츠·재생목록은 관리자의
-    // 운영 화면이다.
-    const wrapper = mountLayout({ roles: ['MEMBER', 'COMMUNITY_USER'] })
-    const labels = wrapper.findAll('.nav-label').map((n) => n.text())
-
-    expect(labels).toEqual(['커뮤니티', '공유 게시판'])
+    expect(labels).toContain('커뮤니티')
   })
 })

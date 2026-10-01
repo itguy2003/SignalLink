@@ -3,9 +3,10 @@ import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
-// 백엔드 주소. 8000 이 다른 프로그램에 점유된 환경이 있어 바꿀 수 있게 열어 둔다.
-//   VITE_API_PROXY=http://127.0.0.1:8001 npm run dev
-const API_PROXY = process.env.VITE_API_PROXY || 'http://127.0.0.1:8000'
+// 백엔드 주소. 기준 백엔드는 .NET(backend-dotnet, 8016)이다. FastAPI(병행
+// 구현)에 붙이거나 포트가 점유된 환경에서는 환경변수로 바꾼다.
+//   VITE_API_PROXY=http://127.0.0.1:8015 npm run dev
+const API_PROXY = process.env.VITE_API_PROXY || 'http://127.0.0.1:8016'
 
 /**
  * 테스트 모드 빌드에 표식을 남긴다.
@@ -65,5 +66,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: 'jsdom',
     globals: true,
+    // node 26 의 자체 localStorage 스텁과 jsdom 을 잇는다(src/test-setup.js 참조).
+    setupFiles: ['./src/test-setup.js'],
   },
 }))

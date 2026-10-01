@@ -4,10 +4,13 @@ from app.api.v1 import (
     assets,
     auth,
     boards,
+    canva,
     community,
     contents,
     device_groups,
     devices,
+    org_notices,
+    org_types,
     organizations,
     player,
     playlists,
@@ -21,6 +24,8 @@ from app.api.v1 import (
 api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(organizations.router)
+api_router.include_router(org_types.router)
+api_router.include_router(org_notices.router)
 api_router.include_router(users.router)
 api_router.include_router(devices.router)
 api_router.include_router(device_groups.router)
@@ -30,6 +35,7 @@ api_router.include_router(playlists.router)
 api_router.include_router(boards.router)
 api_router.include_router(widgets.router)
 api_router.include_router(stock.router)
+api_router.include_router(canva.router)
 api_router.include_router(community.router)
 api_router.include_router(assets.router)
 api_router.include_router(player.router)

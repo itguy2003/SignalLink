@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { branchNodes, filterChildren, findNode, pathTo } from './orgTree'
+import { filterMembers, findNode, pathTo, withChildCount } from './orgTree'
 
 const node = (id, name, children = [], extra = {}) => ({
   id,
@@ -20,41 +20,25 @@ const TREE = [
   ]),
 ]
 
-describe('branchNodes', () => {
-  it('자식이 없는 기관은 뺀다', () => {
-    const [root] = branchNodes(TREE)
-    expect(root.children.map((c) => c.name)).toEqual(['서울교육청'])
+describe('withChildCount', () => {
+  it('모든 기관을 남긴다 — 잎(학교)도 트리에 나온다', () => {
+    const [root] = withChildCount(TREE)
+    expect(root.children.map((child) => child.name)).toEqual(['서울교육청', '부산교육청'])
+    expect(root.children[0].children.map((child) => child.name)).toEqual(['가나초', '다라중'])
   })
 
-  it('잎을 걷어내 트리를 한 단계 얕게 만든다', () => {
-    const [root] = branchNodes(TREE)
-    expect(root.children[0].children).toEqual([])
-  })
-
-  it('가지치기 전 자식 수를 childCount 로 남긴다', () => {
-    // 가지친 뒤의 children.length 를 세면 학교만 가진 교육청이 잎처럼 보인다.
-    const [root] = branchNodes(TREE)
+  it('노드마다 소속기관 수를 붙인다', () => {
+    const [root] = withChildCount(TREE)
     expect(root.childCount).toBe(2)
-    expect(root.children[0].childCount).toBe(2)
+    expect(root.children[0].childCount).toBe(2) // 서울교육청
+    expect(root.children[1].childCount).toBe(0) // 부산교육청
+    expect(root.children[0].children[0].childCount).toBe(0) // 가나초
   })
 
-  it('최상위는 자식이 없어도 남긴다', () => {
-    // 부트스트랩 직후 최상위 하나뿐인 상태에서 트리가 비면 아무것도 못 만든다.
-    expect(branchNodes([node(1, '최상위')]).map((n) => n.name)).toEqual(['최상위'])
-  })
-
-  it('원본을 건드리지 않는다', () => {
-    branchNodes(TREE)
-    expect(TREE[0].children.map((c) => c.name)).toEqual(['서울교육청', '부산교육청'])
-    expect(TREE[0].children[0].children).toHaveLength(2)
-  })
-
-  it('깊이가 더 깊어도 잎만 걷어낸다', () => {
-    const deep = [node(1, 'a', [node(2, 'b', [node(3, 'c', [node(4, 'd')])])])]
-    const [a] = branchNodes(deep)
-    expect(a.children[0].name).toBe('b')
-    expect(a.children[0].children[0].name).toBe('c')
-    expect(a.children[0].children[0].children).toEqual([])
+  it('원본 트리는 건드리지 않는다', () => {
+    withChildCount(TREE)
+    expect('childCount' in TREE[0]).toBe(false)
+    expect(TREE[0].children).toHaveLength(2)
   })
 })
 
@@ -82,31 +66,26 @@ describe('pathTo', () => {
   })
 })
 
-describe('filterChildren', () => {
-  const children = [
-    node(1, '가나초등학교', [], { address: '서울시 종로구' }),
-    node(2, '다라중학교', [], { address: '부산시 해운대구' }),
-    node(3, '마바고등학교'),
+describe('filterMembers', () => {
+  const members = [
+    { name: '박교육', user_id: 'edu_admin' },
+    { name: '최장학', user_id: 'staff2' },
+    { name: '한지원', user_id: 'staff4' },
   ]
 
   it('검색어가 없으면 그대로', () => {
-    expect(filterChildren(children, '  ')).toHaveLength(3)
+    expect(filterMembers(members, '  ')).toHaveLength(3)
   })
 
   it('이름으로 거른다', () => {
-    expect(filterChildren(children, '중학교').map((c) => c.name)).toEqual(['다라중학교'])
+    expect(filterMembers(members, '장학').map((m) => m.name)).toEqual(['최장학'])
   })
 
-  it('주소로도 거른다', () => {
-    expect(filterChildren(children, '해운대').map((c) => c.name)).toEqual(['다라중학교'])
+  it('사용자ID로도 거른다(대소문자 무시)', () => {
+    expect(filterMembers(members, 'EDU_admin').map((m) => m.name)).toEqual(['박교육'])
   })
 
-  it('주소가 없는 기관에서 터지지 않는다', () => {
-    expect(filterChildren(children, '종로').map((c) => c.name)).toEqual(['가나초등학교'])
-  })
-
-  it('대소문자를 가리지 않는다', () => {
-    const en = [node(1, 'Gana Elementary')]
-    expect(filterChildren(en, 'gana')).toHaveLength(1)
+  it('맞는 것이 없으면 빈 목록', () => {
+    expect(filterMembers(members, '없는사람')).toEqual([])
   })
 })

@@ -110,7 +110,7 @@ def test_cannot_delete_org_with_children(client, super_headers, org_tree_ids):
         f"/api/v1/organizations/{org_tree_ids['office']}", headers=super_headers
     )
     assert response.status_code == 400
-    assert "하위 기관" in response.json()["detail"]
+    assert "소속기관" in response.json()["detail"]
 
 
 def test_cannot_delete_root_org(client, super_headers, root_org_id):
@@ -188,9 +188,11 @@ def test_bulk_upload_skips_duplicate_school_code(client, super_headers, org_tree
             )
         },
     ).json()
-    # 같은 (시도교육청코드, 학교코드) 는 다시 만들지 않는다.
+    # 같은 (시도교육청코드, 학교코드) 는 다시 만들지 않고 변경한다.
     assert second["created"] == 0
-    assert second["skipped"] == 1
+    assert second["updated"] == 1
+    listed = client.get("/api/v1/organizations?q=사서초등학교", headers=super_headers).json()
+    assert len(listed) == 1
 
 
 def _walk(nodes):
@@ -276,3 +278,398 @@ def test_editing_one_org_does_not_change_siblings(client, super_headers, org_tre
         if org_id == org_tree_ids["school_a"]:
             continue
         assert after[org_id] == org, f"기관 {org_id} 가 함께 바뀌었다"
+
+
+# ------------------------------------------------------------------ CSV 일괄 등록
+
+# 관리자 화면의 학교 등록은 CSV 도 받는다 — 나이스 등에서 내려받은 목록이
+# 흔히 CSV 라서다. 헤더 규칙은 엑셀과 같아야 한다.
+
+
+def _csv_bytes(text: str, encoding: str = "utf-8-sig") -> bytes:
+    return text.encode(encoding)
+
+
+def test_bulk_upload_accepts_csv(client, super_headers, org_tree_ids):
+    content = _csv_bytes(
+        "기관명,주소,학교단위\n씨에스브이초등학교,서울시,초\n씨에스브이중학교,서울시,중\n"
+    )
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={"file": ("schools.csv", content, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["created"] == 2 and body["errors"] == []
+
+    listed = client.get(
+        "/api/v1/organizations?q=씨에스브이", headers=super_headers
+    ).json()
+    # 기관타입 컬럼이 없어도 학교로 들어간다 — 학교 등록 화면의 기본값.
+    assert {o["org_type"] for o in listed} == {"학교"}
+    assert {o["school_level"] for o in listed} == {"초", "중"}
+
+
+def test_bulk_upload_reads_cp949_csv(client, super_headers, org_tree_ids):
+    # 엑셀이 저장한 CSV 는 cp949 인 경우가 많다.
+    content = _csv_bytes("기관명,기관타입" + chr(10) + "씨피구사구학교,학교" + chr(10), encoding="cp949")
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"]},
+        files={"file": ("schools.csv", content, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == 1
+
+
+def test_bulk_upload_rejects_bad_default_type(client, super_headers, org_tree_ids):
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "동아리"},
+        files={"file": ("schools.csv", _csv_bytes("기관명" + chr(10) + "어딘가" + chr(10)), "text/csv")},
+    )
+    assert response.status_code == 400
+
+
+# ------------------------------------------------------------------ 두 파일 병합 등록
+
+# 학교 정보와 위도·경도가 서로 다른 파일로 오는 경우다. 보조 파일을 함께
+# 올리면 서버가 (시도교육청코드, 학교코드) 또는 이름으로 짝을 맞춰 합친다.
+
+
+def test_bulk_upload_merges_coords_file(client, super_headers, org_tree_ids):
+    info = _csv_bytes(
+        '기관명,학교단위,시도교육청코드,학교코드' + chr(10)
+        + '병합초등학교,초,B10,9010001' + chr(10)
+        + '병합중학교,중,B10,9010002' + chr(10)
+    )
+    # 좌표 파일은 다른 출처라 '학교명' 헤더를 쓴다. 하나는 코드로, 하나는 이름으로 짝이 맞는다.
+    coords = _csv_bytes(
+        '학교명,위도,경도,시도교육청코드,학교코드' + chr(10)
+        + '병합초등학교,37.51,126.72,B10,9010001' + chr(10)
+        + '병합중학교,37.52,126.73,,' + chr(10)
+        + '짝없는학교,37.53,126.74,,' + chr(10)
+    )
+    response = client.post(
+        '/api/v1/organizations/bulk-upload',
+        headers=super_headers,
+        params={'parent_id': org_tree_ids['office'], 'default_org_type': '학교'},
+        files={
+            'file': ('info.csv', info, 'text/csv'),
+            'coords_file': ('coords.csv', coords, 'text/csv'),
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['created'] == 2
+    # 짝을 못 찾은 보조 행은 조용히 버리지 않는다.
+    assert any('짝' in e and '짝없는학교' in e for e in body['errors'])
+
+    listed = client.get('/api/v1/organizations?q=병합', headers=super_headers).json()
+    coords_by_name = {o['name']: (o['latitude'], o['longitude']) for o in listed}
+    assert coords_by_name['병합초등학교'] == (37.51, 126.72)
+    assert coords_by_name['병합중학교'] == (37.52, 126.73)
+
+
+def test_bulk_upload_reads_neis_headers(client, super_headers, org_tree_ids):
+    """학교 정보 관리의 두 파일 규약.
+
+    첫 파일: 첫 줄이 헤더인 나이스 학교기본정보(시도교육청코드·명, 행정코드,
+    학교명, 학교종류명, 시도명, 관할조직명, 도로명주소·상세, 전화번호,
+    홈페이지주소). 두 번째 파일: 위도·경도만 가져온다.
+    """
+    info = _csv_bytes(
+        "시도교육청코드,시도교육청명,행정코드,학교명,학교종류명,시도명,관할조직명,"
+        "도로명주소,도로명상세주소,전화번호,홈페이지주소" + chr(10)
+        + "B10,서울특별시교육청,7025001,나이스초등학교,초등학교,서울특별시,"
+        "서울특별시성동광진교육지원청,서울시 광진구 어딘가 1,(중곡동),02-123-4567,"
+        "http://school.example.org" + chr(10)
+    )
+    coords = _csv_bytes("학교명,위도,경도" + chr(10) + "나이스초등학교,37.55,127.08" + chr(10))
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={
+            "file": ("info.csv", info, "text/csv"),
+            "coords_file": ("coords.csv", coords, "text/csv"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == 1 and response.json()["errors"] == []
+
+    school = client.get(
+        "/api/v1/organizations?q=나이스초등학교", headers=super_headers
+    ).json()[0]
+    assert school["edu_office_code"] == "B10"
+    assert school["edu_office_name"] == "서울특별시교육청"
+    assert school["school_code"] == "7025001"  # 행정코드 → 학교코드
+    assert school["school_level"] == "초"  # 학교종류명 → 학교급
+    assert school["sido_name"] == "서울특별시"
+    assert school["jurisdiction_name"] == "서울특별시성동광진교육지원청"
+    assert school["address"] == "서울시 광진구 어딘가 1"
+    assert school["address_detail"] == "(중곡동)"
+    assert school["phone"] == "02-123-4567"
+    assert school["homepage"] == "http://school.example.org"
+    assert (school["latitude"], school["longitude"]) == (37.55, 127.08)
+
+
+def test_supplement_fills_coords_only(client, super_headers, org_tree_ids):
+    # 두 번째 파일의 몫은 위도·경도뿐이다 — 주소 등 다른 칸은 가져오지 않는다.
+    info = _csv_bytes("기관명" + chr(10) + "좌표만학교" + chr(10))
+    coords = _csv_bytes(
+        "학교명,주소,위도,경도" + chr(10) + "좌표만학교,보조 주소,37.0,127.0" + chr(10)
+    )
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={
+            "file": ("info.csv", info, "text/csv"),
+            "coords_file": ("coords.csv", coords, "text/csv"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    school = client.get("/api/v1/organizations?q=좌표만학교", headers=super_headers).json()[0]
+    assert school["address"] is None
+    assert (school["latitude"], school["longitude"]) == (37.0, 127.0)
+
+
+def test_school_kind_names_become_levels(client, super_headers, org_tree_ids):
+    # 학교종류명(고등학교/방송통신중학교/특수학교)이 학교급(고/중/기타)으로 바뀐다.
+    info = _csv_bytes(
+        "학교명,학교종류명" + chr(10)
+        + "종류하나,고등학교" + chr(10)
+        + "종류둘,방송통신중학교" + chr(10)
+        + "종류셋,특수학교" + chr(10)
+    )
+    response = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={"file": ("info.csv", info, "text/csv")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == 3
+    listed = client.get("/api/v1/organizations?q=종류", headers=super_headers).json()
+    levels = {o["name"]: o["school_level"] for o in listed}
+    assert levels == {"종류하나": "고", "종류둘": "중", "종류셋": "기타"}
+
+
+def test_bulk_upload_builds_org_tree_and_updates_by_name(
+    client, super_headers, root_org_id, org_tree_ids
+):
+    """시도교육청명 → 최상위 바로 아래, 관할조직명 → 교육청 아래(각각 없을
+    때만 생성), 학교는 그 아래. 같은 학교명은 다시 만들지 않고 변경한다."""
+    info = _csv_bytes(
+        "학교명,시도교육청명,관할조직명,주소" + chr(10)
+        + "트리초등학교,트리교육청,트리교육지원청,처음 주소" + chr(10)
+    )
+    first = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={"file": ("info.csv", info, "text/csv")},
+    ).json()
+    assert first["created"] == 1 and first["errors"] == []
+
+    orgs = client.get("/api/v1/organizations?q=트리", headers=super_headers).json()
+    by_name = {o["name"]: o for o in orgs}
+    assert by_name["트리교육청"]["parent_id"] == root_org_id
+    assert by_name["트리교육지원청"]["parent_id"] == by_name["트리교육청"]["id"]
+    assert by_name["트리초등학교"]["parent_id"] == by_name["트리교육지원청"]["id"]
+
+    # 두 번째 업로드 — 기관 트리는 그대로 재사용하고, 같은 학교명은 변경.
+    info2 = _csv_bytes(
+        "학교명,시도교육청명,관할조직명,주소" + chr(10)
+        + "트리초등학교,트리교육청,트리교육지원청,바뀐 주소" + chr(10)
+    )
+    second = client.post(
+        "/api/v1/organizations/bulk-upload",
+        headers=super_headers,
+        params={"parent_id": org_tree_ids["office"], "default_org_type": "학교"},
+        files={"file": ("info.csv", info2, "text/csv")},
+    ).json()
+    assert second["created"] == 0 and second["updated"] == 1
+
+    orgs2 = client.get("/api/v1/organizations?q=트리", headers=super_headers).json()
+    assert len(orgs2) == 3  # 교육청·지원청·학교 — 중복 생성 없음
+    assert {o["name"]: o["address"] for o in orgs2}["트리초등학교"] == "바뀐 주소"
+
+
+def test_merge_does_not_overwrite_base_values(client, super_headers, org_tree_ids):
+    # 본 파일이 정본이다 — 이미 있는 값은 보조 파일이 덮지 않는다.
+    info = _csv_bytes('기관명,위도,경도' + chr(10) + '정본학교,35.1,129.1' + chr(10))
+    coords = _csv_bytes('학교명,위도,경도' + chr(10) + '정본학교,1.0,2.0' + chr(10))
+    response = client.post(
+        '/api/v1/organizations/bulk-upload',
+        headers=super_headers,
+        params={'parent_id': org_tree_ids['office'], 'default_org_type': '학교'},
+        files={
+            'file': ('info.csv', info, 'text/csv'),
+            'coords_file': ('coords.csv', coords, 'text/csv'),
+        },
+    )
+    assert response.status_code == 200, response.text
+    listed = client.get('/api/v1/organizations?q=정본학교', headers=super_headers).json()
+    assert (listed[0]['latitude'], listed[0]['longitude']) == (35.1, 129.1)
+
+
+def test_delete_school_removes_owned_cms_data(client, super_headers, org_tree_ids):
+    """스케줄·콘텐츠가 있어도 학교는 지워진다 — 소유 CMS 자료를 함께 지운다.
+
+    이들이 RESTRICT FK 로 삭제를 막아 학교 정보 관리에서 500 이 나던 버그.
+    """
+    school = org_tree_ids["school_a"]
+    content = client.post(
+        "/api/v1/contents",
+        headers=super_headers,
+        json={"name": "삭제될 콘텐츠", "org_id": school},
+    )
+    assert content.status_code == 201, content.text
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={"name": "삭제될 스케줄", "kind": "시간지정", "org_id": school, "items": []},
+    )
+    assert schedule.status_code == 201, schedule.text
+
+    deleted = client.delete(f"/api/v1/organizations/{school}", headers=super_headers)
+    assert deleted.status_code == 200, deleted.text
+
+    # 기관도, 그 기관이 소유하던 자료도 남지 않는다.
+    assert (
+        client.get(f"/api/v1/organizations/{school}", headers=super_headers).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/contents/{content.json()['id']}", headers=super_headers
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/schedules/{schedule.json()['id']}", headers=super_headers
+        ).status_code
+        == 404
+    )
+
+
+class TestBulkDelete:
+    """/organizations/bulk-delete — 학교 정보 관리의 일괄 삭제."""
+
+    def test_deletes_ids_and_reports_skips(
+        self, client, super_headers, org_tree_ids, make_user
+    ):
+        # school_b 는 사용자가 있고 office 는 하위 기관이 있다 — 둘 다 건너뛴다.
+        make_user("bulk_member", org_tree_ids["school_b"], [Role.MEMBER])
+        response = client.post(
+            "/api/v1/organizations/bulk-delete",
+            headers=super_headers,
+            json={
+                "ids": [
+                    org_tree_ids["school_a"],
+                    org_tree_ids["school_b"],
+                    org_tree_ids["office"],
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["deleted"] == 1
+        assert body["skipped"] == 2
+        assert any("하위 기관" in e for e in body["errors"])
+        assert any("소속 사용자" in e for e in body["errors"])
+        gone = client.get(
+            f"/api/v1/organizations/{org_tree_ids['school_a']}", headers=super_headers
+        )
+        assert gone.status_code == 404
+
+    def test_filter_mode_deletes_matching_schools(
+        self, client, super_headers, org_tree_ids
+    ):
+        # 검색 조건(분류=학교)으로 지운다 — 교육청은 학교가 아니라 안 잡힌다.
+        response = client.post(
+            "/api/v1/organizations/bulk-delete",
+            headers=super_headers,
+            json={"category": "학교", "q": "학교"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["deleted"] == 2 and body["skipped"] == 0
+        offices = client.get(
+            f"/api/v1/organizations/{org_tree_ids['office']}", headers=super_headers
+        )
+        assert offices.status_code == 200
+
+    def test_requires_criteria(self, client, super_headers, org_tree_ids):
+        # 조건 없는 요청은 '전부 삭제'다 — 거절한다.
+        response = client.post(
+            "/api/v1/organizations/bulk-delete", headers=super_headers, json={}
+        )
+        assert response.status_code == 400
+        assert "삭제할 대상" in response.json()["detail"]
+
+    def test_out_of_scope_orgs_are_skipped(
+        self, client, org_tree_ids, make_user, login
+    ):
+        # 다른 교육청 관리자는 남의 학교를 못 지운다 — 권한 사유로 건너뛴다.
+        make_user("bulk_other_admin", org_tree_ids["other_office"], [Role.ORG_ADMIN])
+        headers = login("bulk_other_admin")
+        response = client.post(
+            "/api/v1/organizations/bulk-delete",
+            headers=headers,
+            json={"ids": [org_tree_ids["school_a"]]},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["deleted"] == 0 and body["skipped"] == 1
+        assert any("권한" in e for e in body["errors"])
+
+
+class TestPagedList:
+    """/organizations/paged — 학교 정보 관리처럼 큰 목록을 쓰는 화면용."""
+
+    def test_category_filters_and_pages(self, client, super_headers, org_tree_ids):
+        first = client.get(
+            "/api/v1/organizations/paged",
+            headers=super_headers,
+            params={"category": "학교", "page": 1, "size": 1},
+        ).json()
+        assert first["total"] == 2
+        assert first["page"] == 1 and first["size"] == 1
+        assert len(first["items"]) == 1
+        # 이름순 정렬 — 가나초등학교가 먼저다.
+        assert first["items"][0]["name"] == "가나초등학교"
+
+        second = client.get(
+            "/api/v1/organizations/paged",
+            headers=super_headers,
+            params={"category": "학교", "page": 2, "size": 1},
+        ).json()
+        assert [o["name"] for o in second["items"]] == ["다라중학교"]
+
+    def test_query_narrows(self, client, super_headers, org_tree_ids):
+        body = client.get(
+            "/api/v1/organizations/paged",
+            headers=super_headers,
+            params={"category": "학교", "q": "중학"},
+        ).json()
+        assert body["total"] == 1
+        assert body["items"][0]["name"] == "다라중학교"
+
+    def test_scope_limits_visibility(self, client, org_tree_ids, make_user, login):
+        """다른 교육청 관리자에게는 내 학교가 안 보인다."""
+        make_user("other_admin", org_tree_ids["other_office"], [Role.ORG_ADMIN])
+        headers = login("other_admin")
+        body = client.get(
+            "/api/v1/organizations/paged",
+            headers=headers,
+            params={"category": "학교"},
+        ).json()
+        assert body["total"] == 0

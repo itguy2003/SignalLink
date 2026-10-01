@@ -1,0 +1,18 @@
+@host = http://127.0.0.1:8016
+
+### 상태 확인
+GET {{host}}/api/v1/health
+
+### 로그인 (시드 계정)
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "user_id": "community", "password": "test1234" }
+
+### 내 정보 — 위 응답의 access_token 을 넣을 것
+GET {{host}}/api/v1/auth/me
+Authorization: Bearer {{token}}
+
+### 커뮤니티 재생목록 목록
+GET {{host}}/api/v1/community/playlists?size=5
+Authorization: Bearer {{token}}

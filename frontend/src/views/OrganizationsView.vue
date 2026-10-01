@@ -7,23 +7,19 @@ import ModalDialog from '@/components/ModalDialog.vue'
 import OrgTree from '@/components/OrgTree.vue'
 import ProgressBar from '@/components/ProgressBar.vue'
 import { useToastStore } from '@/stores/toast'
-import { branchNodes, filterChildren, findNode, pathTo } from '@/utils/orgTree'
+import { filterMembers, findNode, pathTo, withChildCount } from '@/utils/orgTree'
 
 const toast = useToastStore()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const tree = ref([])
 const selected = ref(null)
 const loading = ref(false)
-const childQuery = ref('')
 
-/**
- * 트리에는 하위 기관을 가진 기관만 그린다. 잎(학교 등)은 오른쪽 목록이 맡는다.
- * 교육청 하나에 학교가 수백 개씩 달리면 트리로는 찾을 수 없기 때문이다.
- */
-const treeNodes = computed(() => branchNodes(tree.value))
+/** 트리에는 모든 기관을 그린다. 잎(학교 등)도 트리에서 바로 고른다. */
+const treeNodes = computed(() => withChildCount(tree.value))
 
-/** 지금 어디에 있는지. 트리에 안 보이는 기관을 목록에서 골랐을 때 특히 필요하다. */
+/** 지금 어디에 있는지 — 상위로 거슬러 올라가는 길. */
 const crumbs = computed(() =>
   selected.value ? pathTo(tree.value, selected.value.id) : [],
 )
@@ -32,20 +28,92 @@ const crumbs = computed(() =>
 const parentOrg = computed(() => (crumbs.value.length > 1 ? crumbs.value.at(-2) : null))
 
 const children = computed(() => selected.value?.children ?? [])
-const visibleChildren = computed(() => filterChildren(children.value, childQuery.value))
+
+/**
+ * 고른 기관에 소속된 사용자. 상세 아래쪽 목록이 보여 준다.
+ *
+ * /users?org_id= 는 하위 트리 전체의 사용자를 돌려주므로, 이 기관에 **직접**
+ * 소속된 사람만 남긴다 — "기관에 소속된 사용자"의 뜻은 그쪽이다.
+ */
+const members = ref([])
+const membersLoading = ref(false)
+const memberQuery = ref('')
+const visibleMembers = computed(() => filterMembers(members.value, memberQuery.value))
+
+async function loadMembers(org) {
+  members.value = []
+  if (!org) return
+  membersLoading.value = true
+  try {
+    const page = await api.get('/users', { org_id: org.id, size: 200 })
+    members.value = (page.items ?? []).filter((user) => user.org_id === org.id)
+  } catch (err) {
+    toast.error(err.detail ?? t('org.membersLoadFailed'))
+  } finally {
+    membersLoading.value = false
+  }
+}
+
+// ------------------------------------------------------------ 소속 사용자 등록
+// 관리자가 이 화면에서 바로 계정을 만든다. 서버가 즉시 '승인' 상태로
+// 저장하므로 만든 계정은 바로 로그인할 수 있다. 역할 부여는 사용자 관리에서.
+const memberDialog = ref(false)
+const memberBusy = ref(false)
+const memberError = ref('')
+const memberForm = ref({})
+
+function openMemberCreate() {
+  memberForm.value = {
+    user_id: '', name: '', password: '', password_confirm: '', phone: '', email: '',
+  }
+  memberError.value = ''
+  memberDialog.value = true
+}
+
+async function saveMember() {
+  const form = memberForm.value
+  if (!form.user_id.trim() || !form.name.trim() || !form.password) {
+    memberError.value = t('org.memberFormIncomplete')
+    return
+  }
+  if (form.password !== form.password_confirm) {
+    memberError.value = t('auth.passwordMismatch')
+    return
+  }
+  memberBusy.value = true
+  memberError.value = ''
+  try {
+    await api.post('/users', {
+      org_id: selected.value.id,
+      user_id: form.user_id.trim(),
+      password: form.password,
+      name: form.name.trim(),
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+    })
+    memberDialog.value = false
+    toast.success(t('org.memberCreated'))
+    await loadMembers(selected.value)
+  } catch (err) {
+    memberError.value = err.detail ?? t('org.memberCreateFailed')
+  } finally {
+    memberBusy.value = false
+  }
+}
 
 function select(org) {
   selected.value = org
   // 다른 기관으로 옮겼는데 이전 검색어가 남아 있으면 목록이 빈 것처럼 보인다.
-  childQuery.value = ''
+  memberQuery.value = ''
+  loadMembers(org)
 }
 
 /**
  * 트리에서 고른 기관.
  *
- * 트리가 넘겨주는 노드는 `branchNodes()` 가 만든 **사본**이라 잎이 잘려 있다.
- * 그대로 고르면 오른쪽 목록이 비거나(교육청) 일부만 나온다(최상위). 원본
- * 트리에서 같은 id 를 다시 찾아 고른다.
+ * 트리가 넘겨주는 노드는 `withChildCount()` 가 만든 **사본**이다. 원본
+ * 트리에서 같은 id 를 다시 찾아 고른다 — 수정/삭제가 원본 노드를 기준으로
+ * 돌기 때문이다.
  */
 function selectById(id) {
   select(findNode(tree.value, id))
@@ -73,11 +141,33 @@ const uploadResult = ref(null)
 /** 올리는 중의 진행률. 0~1, 서버가 읽는 동안에는 null(흐르는 띠). */
 const uploadProgress = ref(0)
 
-const isSchool = computed(() => form.value.org_type === '학교')
+/**
+ * 기관구분 목록 — 고정 3종이 아니라 서버 마스터다(관리자 메뉴에서 관리).
+ * 학교급 입력 여부 같은 동작은 이름이 아니라 분류(category)를 따른다.
+ */
+const orgTypes = ref([])
 
-// 서버가 저장하는 값은 한국어 코드다. 화면 표시만 번역한다.
-const ORG_TYPES = ['기관', '학교', '기타']
-const SCHOOL_LEVELS = ['초', '중', '고']
+function typeCategory(name) {
+  return orgTypes.value.find((type) => type.name === name)?.category ?? '기타'
+}
+
+/**
+ * 지금 고른 기관구분의 분류 선택지 — 서버가 쉼표로 이어 준 것을 쪼갠다.
+ * 구분마다 다르다(학교: 초/중/고, 다른 구분은 관리자가 정한 값들).
+ */
+const classificationOptions = computed(() => {
+  const raw = orgTypes.value.find((type) => type.name === form.value.org_type)?.classifications
+  return (raw ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+})
+
+/** 분류 값 표시 — 학교급(초/중/고)은 번역이 있고, 나머지는 값 그대로. */
+function levelLabel(value) {
+  const key = `enums.schoolLevel.${value}`
+  return te(key) ? t(key) : value
+}
 
 /**
  * 트리를 다시 읽는다.
@@ -92,10 +182,10 @@ async function load(focusId = selected.value?.id ?? null) {
   document.head.appendChild(script)
   loading.value = true
   try {
+    orgTypes.value = await api.get('/org-types').catch(() => orgTypes.value)
     tree.value = await api.get('/organizations/tree')
     const focused = focusId === null ? null : findNode(tree.value, focusId)
-    // 최상위를 미리 골라 둔다. 이제 하위 기관은 목록에만 있으므로,
-    // 아무것도 선택되지 않은 화면은 트리를 누르기 전까지 아무것도 못 보여 준다.
+    // 최상위를 미리 골라 둔다 — 빈 오른쪽 화면으로 시작하지 않게.
     select(focused ?? tree.value[0] ?? null)
   } catch (err) {
     toast.error(err.detail ?? t('org.loadFailed'))
@@ -111,7 +201,11 @@ function openCreate() {
     toast.error(t('org.selectParentFirst'))
     return
   }
-  form.value = { ...emptyForm(), parent_id: selected.value.id }
+  form.value = {
+    ...emptyForm(),
+    parent_id: selected.value.id,
+    org_type: orgTypes.value[0]?.name ?? '기관',
+  }
   formError.value = ''
   dialog.value = 'create'
 }
@@ -138,7 +232,10 @@ function payload() {
     name: form.value.name.trim(),
     parent_id: form.value.parent_id,
     org_type: form.value.org_type,
-    school_level: isSchool.value ? form.value.school_level : null,
+    // 분류는 그 구분의 선택지 안에서만 뜻이 있다 — 구분을 바꿨으면 걸러낸다.
+    school_level: classificationOptions.value.includes(form.value.school_level)
+      ? form.value.school_level
+      : null,
     address: form.value.address.trim() || null,
     latitude: form.value.latitude === '' ? null : form.value.latitude,
     longitude: form.value.longitude === '' ? null : form.value.longitude,
@@ -274,7 +371,6 @@ function searchAddress() {
             @select="selectById($event.id)"
           />
         </div>
-        <p class="hint tree-note">{{ t('org.treeBranchOnly') }}</p>
       </section>
 
       <section class="card detail-panel">
@@ -327,11 +423,12 @@ function searchAddress() {
               </div>
               <div>
                 <dt>{{ t('org.orgType') }}</dt>
-                <dd>{{ t(`enums.orgType.${selected.org_type}`) }}</dd>
+                <!-- 기관구분 이름은 관리자가 정하는 데이터 — 번역 없이 그대로. -->
+                <dd>{{ selected.org_type }}</dd>
               </div>
               <div v-if="selected.school_level">
-                <dt>{{ t('org.schoolLevel') }}</dt>
-                <dd>{{ t(`enums.schoolLevel.${selected.school_level}`) }}</dd>
+                <dt>{{ t('org.classification') }}</dt>
+                <dd>{{ levelLabel(selected.school_level) }}</dd>
               </div>
               <div>
                 <dt>{{ t('org.address') }}</dt>
@@ -378,56 +475,74 @@ function searchAddress() {
         </div>
 
         <!--
-          하위 기관 목록. 트리에서 뺀 잎 기관들이 여기로 온다.
-          위의 기관 정보를 읽고 그 아래로 내려가는 순서다.
+          소속 사용자 목록. 기관 정보를 읽고 그 아래에서 이 기관 사람들을
+          본다 — 기관 탐색은 이제 왼쪽 트리가 전부 맡는다.
         -->
         <div v-if="selected" class="children">
           <div class="children-head">
             <h3>
-              {{ t('org.children') }}
-              <span class="muted">{{ children.length }}</span>
+              {{ t('org.members') }}
+              <span class="muted">{{ members.length }}</span>
             </h3>
             <input
-              v-if="children.length > 5"
-              v-model="childQuery"
+              v-if="members.length > 5"
+              v-model="memberQuery"
               class="input child-search"
               type="search"
-              :placeholder="t('org.searchChildren')"
+              :placeholder="t('org.searchMembers')"
             />
+            <button
+              class="btn btn-sm btn-primary"
+              data-test="add-member"
+              @click="openMemberCreate"
+            >
+              {{ t('org.addMember') }}
+            </button>
           </div>
 
-          <p v-if="children.length === 0" class="muted pad">
-            {{ t('org.noChildren') }}
+          <p v-if="membersLoading" class="muted pad">{{ t('common.loading') }}</p>
+          <p v-else-if="members.length === 0" class="muted pad">
+            {{ t('org.noMembers') }}
           </p>
-          <p v-else-if="visibleChildren.length === 0" class="muted pad">
+          <p v-else-if="visibleMembers.length === 0" class="muted pad">
             {{ t('org.searchNoMatch') }}
           </p>
           <div v-else class="child-scroll">
             <table class="table child-table">
               <thead>
                 <tr>
-                  <th>{{ t('org.name') }}</th>
-                  <th>{{ t('org.orgType') }}</th>
-                  <th>{{ t('org.address') }}</th>
-                  <th class="num">{{ t('org.childCount') }}</th>
+                  <th>{{ t('auth.name') }}</th>
+                  <th>{{ t('auth.userId') }}</th>
+                  <th>{{ t('user.roles') }}</th>
+                  <th>{{ t('user.status') }}</th>
+                  <th>{{ t('auth.phone') }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  v-for="child in visibleChildren"
-                  :key="child.id"
-                  class="child-row"
-                  @click="select(child)"
-                >
+                <tr v-for="member in visibleMembers" :key="member.id" data-test="member-row">
+                  <td>{{ member.name }}</td>
+                  <td class="mono">{{ member.user_id }}</td>
                   <td>
-                    <button class="child-name" @click.stop="select(child)">{{ child.name }}</button>
-                    <span v-if="child.school_level" class="badge badge-muted">
-                      {{ t(`enums.schoolLevel.${child.school_level}`) }}
+                    <span
+                      v-for="role in member.roles.filter((r) => r !== 'MEMBER')"
+                      :key="role"
+                      class="badge badge-muted role-badge"
+                    >
+                      {{ t(`enums.role.${role}`) }}
+                    </span>
+                    <span v-if="member.roles.every((r) => r === 'MEMBER')" class="muted">
+                      {{ t('enums.role.MEMBER') }}
                     </span>
                   </td>
-                  <td>{{ t(`enums.orgType.${child.org_type}`) }}</td>
-                  <td class="muted">{{ child.address ?? '-' }}</td>
-                  <td class="num">{{ child.children.length }}</td>
+                  <td>
+                    <span
+                      class="badge"
+                      :class="member.status === '승인' ? 'badge-success' : 'badge-muted'"
+                    >
+                      {{ t(`enums.userStatus.${member.status}`) }}
+                    </span>
+                  </td>
+                  <td class="muted">{{ member.phone ?? '-' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -453,18 +568,24 @@ function searchAddress() {
       <div class="grid-2">
         <div class="field">
           <label>{{ t('org.orgType') }}</label>
-          <select v-model="form.org_type" class="select">
-            <option v-for="value in ORG_TYPES" :key="value" :value="value">
-              {{ t(`enums.orgType.${value}`) }}
+          <select v-model="form.org_type" class="select" data-test="org-type-select">
+            <option v-for="type in orgTypes" :key="type.id" :value="type.name">
+              {{ type.name }}
             </option>
           </select>
         </div>
         <div class="field">
-          <label>{{ t('org.schoolLevel') }}</label>
-          <select v-model="form.school_level" class="select" :disabled="!isSchool">
+          <label>{{ t('org.classification') }}</label>
+          <!-- 선택지는 기관구분이 정한다 — 없으면 고를 것이 없다. -->
+          <select
+            v-model="form.school_level"
+            class="select"
+            :disabled="classificationOptions.length === 0"
+            data-test="classification-select"
+          >
             <option :value="null">{{ t('org.notApplicable') }}</option>
-            <option v-for="value in SCHOOL_LEVELS" :key="value" :value="value">
-              {{ t(`enums.schoolLevel.${value}`) }}
+            <option v-for="value in classificationOptions" :key="value" :value="value">
+              {{ levelLabel(value) }}
             </option>
           </select>
         </div>
@@ -558,6 +679,59 @@ function searchAddress() {
 
       <p v-if="formError" class="error-text">{{ formError }}</p>
     </ModalDialog>
+
+    <!-- 소속 사용자 등록 — 등록 즉시 '승인'이라 바로 로그인할 수 있다. -->
+    <ModalDialog
+      v-if="memberDialog"
+      :title="t('org.addMemberTitle', { name: selected?.name })"
+      :busy="memberBusy"
+      width="520px"
+      @close="memberDialog = false"
+      @confirm="saveMember"
+    >
+      <div class="grid-2">
+        <div class="field">
+          <label>{{ t('auth.userId') }}</label>
+          <input v-model="memberForm.user_id" class="input" data-test="member-user-id" />
+        </div>
+        <div class="field">
+          <label>{{ t('auth.name') }}</label>
+          <input v-model="memberForm.name" class="input" data-test="member-name" />
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label>{{ t('auth.password') }}</label>
+          <input
+            v-model="memberForm.password"
+            type="password"
+            class="input"
+            data-test="member-password"
+          />
+        </div>
+        <div class="field">
+          <label>{{ t('auth.passwordConfirm') }}</label>
+          <input
+            v-model="memberForm.password_confirm"
+            type="password"
+            class="input"
+            data-test="member-password-confirm"
+          />
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label>{{ t('auth.phone') }}</label>
+          <input v-model="memberForm.phone" class="input" />
+        </div>
+        <div class="field">
+          <label>{{ t('auth.email') }}</label>
+          <input v-model="memberForm.email" class="input" />
+        </div>
+      </div>
+      <p class="hint">{{ t('org.addMemberHint') }}</p>
+      <p v-if="memberError" class="error-text">{{ memberError }}</p>
+    </ModalDialog>
   </div>
 </template>
 
@@ -632,7 +806,11 @@ function searchAddress() {
   font-size: 11px;
 }
 
-/* ------------------------------------------------------- 하위 기관 목록 */
+/* ------------------------------------------------------ 소속 사용자 목록 */
+.role-badge {
+  margin-right: 4px;
+}
+
 .children {
   /* 위쪽 기관 정보와 나누는 선. 카드 안의 두 번째 구역이다. */
   border-top: 1px solid var(--border);
@@ -671,31 +849,6 @@ function searchAddress() {
   position: sticky;
   top: 0;
   z-index: 1;
-}
-
-.child-row {
-  cursor: pointer;
-}
-
-.child-name {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--primary);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.child-name:hover {
-  text-decoration: underline;
-}
-
-.num {
-  text-align: right;
-  width: 1%;
-  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------- 상세 */

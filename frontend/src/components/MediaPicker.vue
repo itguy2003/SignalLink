@@ -20,12 +20,12 @@ const props = defineProps({
   orgId: { type: Number, default: null },
   /** 지금 요소에 들어 있는 주소. '링크' 탭을 열 때 채워 준다. */
   current: { type: String, default: '' },
+  /** 자산 출처 바꿔 끼우기 — MediaSourcePanel 의 `source` 그대로. */
+  source: { type: Object, default: null },
   /** 콘텐츠 방향. 검색에서 그 방향 이미지만 찾는 데 쓴다. */
   orientation: { type: String, default: null },
   /** 여러 장을 한 번에 고를지. 켜면 `select-many` 로 배열을 올린다. */
   multiple: { type: Boolean, default: false },
-  /** 'default' | 'community'. 커뮤니티 편집기의 재료 구성(`MediaSourcePanel`). */
-  variant: { type: String, default: 'default' },
 })
 
 const emit = defineEmits(['close', 'select', 'select-many'])
@@ -45,10 +45,10 @@ const isImage = computed(() => props.kind === 'image')
     <MediaSourcePanel
       :kind="kind"
       :org-id="orgId"
+      :source="source"
       :current="current"
       :orientation="orientation"
       :multiple="multiple"
-      :variant="variant"
       @select="emit('select', $event)"
       @select-many="emit('select-many', $event)"
     />

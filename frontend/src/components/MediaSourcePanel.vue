@@ -42,39 +42,116 @@ const props = defineProps({
   /** 여러 장을 한 번에 고를지. 켜면 `select-many` 로 배열을 올린다. */
   multiple: { type: Boolean, default: false },
   /**
-   * 'default' | 'community'. 커뮤니티 콘텐츠 편집기는 재료가 다르다 —
-   * 공유 이미지·동영상 / 라이브러리 / 외부 링크만 쓰고, 업로드와 스톡 검색은
-   * 없다(공유는 커뮤니티 화면에서 하고, 검색으로 받은 것도 결국 업로드다).
+   * 자산 출처를 바꿔 끼운다 — `{ list(kind), upload(file, onProgress) }`.
+   * 기본은 기관 자산 라이브러리(/assets)지만, 커뮤니티 게시물처럼 제 파일만
+   * 쓰는 곳은 그 게시물에 올린 파일을 목록으로 주고 업로드도 그쪽으로 보낸다.
    */
-  variant: { type: String, default: 'default' },
+  source: { type: Object, default: null },
 })
 
 const emit = defineEmits(['select', 'select-many'])
 
 const { t } = useI18n()
 
-const isCommunity = computed(() => props.variant === 'community')
+const tab = ref('upload')
 
-const tab = ref(props.variant === 'community' ? 'shared' : 'upload')
+// ------------------------------------------------------------ Canva 연동
+// 서버가 토큰을 보관한다(/canva/*). 여기서는 연결 팝업을 열고, 연결되면
+// 디자인 목록을 보여 주고, 고르면 서버가 PNG 로 내보내 자산으로 저장한다.
+const canvaStatus = ref(null) // null=미조회 | {configured, connected}
+const canvaDesigns = ref([])
+const canvaContinuation = ref(null)
+const canvaQuery = ref('')
+const canvaLoading = ref(false)
+const canvaError = ref('')
+const canvaImporting = ref(null) // 가져오는 중인 디자인 id
+let canvaPollTimer = null
 
-/** 커뮤니티에 공유된 이미지·동영상(커뮤니티 변형에서만 받는다). */
-const shared = ref([])
-const sharedLoading = ref(false)
-const sharedError = ref('')
+async function openCanvaTab() {
+  tab.value = 'canva'
+  if (canvaStatus.value === null) await refreshCanva()
+}
 
-async function loadShared() {
-  sharedLoading.value = true
-  sharedError.value = ''
+async function refreshCanva() {
+  canvaError.value = ''
   try {
-    // 게시판 글에 붙인 파일이 곧 공유 재료다. 서버가 낱개로 편 채 준다.
-    const page = await api.get('/community/media', { kind: props.kind, size: 100 })
-    shared.value = page?.items ?? []
+    canvaStatus.value = await api.get('/canva/status')
+    if (canvaStatus.value.connected && canvaDesigns.value.length === 0) await loadCanvaDesigns()
   } catch (err) {
-    shared.value = []
-    sharedError.value = err?.detail ?? t('media.loadFailed')
-  } finally {
-    sharedLoading.value = false
+    canvaError.value = err?.detail ?? t('media.loadFailed')
   }
+}
+
+/** 연결 팝업을 열고, 콜백이 끝나 연결될 때까지 상태를 되묻는다. */
+async function connectCanva() {
+  canvaError.value = ''
+  try {
+    const { url } = await api.post('/canva/authorize')
+    window.open(url, 'canva-auth', 'width=540,height=720')
+  } catch (err) {
+    canvaError.value = err?.detail ?? t('media.loadFailed')
+    return
+  }
+  clearInterval(canvaPollTimer)
+  let tries = 0
+  canvaPollTimer = setInterval(async () => {
+    tries += 1
+    if (tries > 60) {
+      clearInterval(canvaPollTimer)
+      return
+    }
+    const status = await api.get('/canva/status').catch(() => null)
+    if (status?.connected) {
+      clearInterval(canvaPollTimer)
+      canvaStatus.value = status
+      await loadCanvaDesigns()
+    }
+  }, 2000)
+}
+
+async function loadCanvaDesigns(more = false) {
+  canvaLoading.value = true
+  canvaError.value = ''
+  try {
+    const page = await api.get('/canva/designs', {
+      query: canvaQuery.value || undefined,
+      continuation: more ? (canvaContinuation.value ?? undefined) : undefined,
+    })
+    canvaDesigns.value = more ? [...canvaDesigns.value, ...page.items] : page.items
+    canvaContinuation.value = page.continuation ?? null
+  } catch (err) {
+    canvaError.value = err?.detail ?? t('media.loadFailed')
+  } finally {
+    canvaLoading.value = false
+  }
+}
+
+/** 서버가 PNG 로 내보내 자산으로 저장한다 — 여러 장이면 장마다 하나. */
+async function importCanva(design) {
+  if (canvaImporting.value) return
+  canvaImporting.value = design.id
+  canvaError.value = ''
+  try {
+    const created = await api.post('/canva/import', {
+      design_id: design.id,
+      org_id: props.orgId ?? undefined,
+      title: design.title,
+    })
+    const items = created.map((asset) => ({ src: asset.url, asset }))
+    if (props.multiple && items.length > 1) emit('select-many', items)
+    else emit('select', items[0])
+  } catch (err) {
+    canvaError.value = err?.detail ?? t('media.canvaImportFailed')
+  } finally {
+    canvaImporting.value = null
+  }
+}
+
+async function disconnectCanva() {
+  if (!confirm(t('media.canvaDisconnectConfirm'))) return
+  await api.delete('/canva/connection').catch(() => {})
+  canvaStatus.value = { ...(canvaStatus.value ?? {}), connected: false }
+  canvaDesigns.value = []
 }
 
 const assets = ref([])
@@ -135,8 +212,12 @@ async function loadAssets() {
   try {
     // 열 때마다 다시 받는다. 한 번 받아 두면 다른 탭에서 올린 파일이
     // 이 화면에서는 영영 보이지 않는다.
-    const page = await api.get('/assets', { kind: props.kind, size: 100 })
-    assets.value = page?.items ?? []
+    if (props.source) {
+      assets.value = (await props.source.list(props.kind)) ?? []
+    } else {
+      const page = await api.get('/assets', { kind: props.kind, size: 100 })
+      assets.value = page?.items ?? []
+    }
   } catch (err) {
     assets.value = []
     // 실패를 '올린 파일이 없습니다' 로 뭉개면 기능이 없는 것처럼 보인다.
@@ -150,7 +231,6 @@ async function loadAssets() {
 
 onMounted(() => {
   loadAssets()
-  if (isCommunity.value) loadShared()
 })
 
 /**
@@ -166,6 +246,10 @@ function deliver(items) {
 }
 
 async function uploadOne(file, onProgress) {
+  if (props.source) {
+    const uploaded = await props.source.upload(file, onProgress)
+    return { src: uploaded.url, asset: uploaded }
+  }
   const form = new FormData()
   form.append('file', file)
   const asset = await api.upload(
@@ -290,69 +374,31 @@ function chooseLink() {
 <template>
   <div class="media-source">
     <div class="tabs">
-      <!-- 커뮤니티 변형: 공유물이 첫 재료다. -->
-      <button
-        v-if="isCommunity"
-        class="tab"
-        :class="{ active: tab === 'shared' }"
-        @click="tab = 'shared'"
-      >
-        {{ isImage ? t('community.imagesTitle') : t('community.videosTitle') }}
-      </button>
-      <button
-        v-if="!isCommunity"
-        class="tab"
-        :class="{ active: tab === 'upload' }"
-        @click="tab = 'upload'"
-      >
+      <button class="tab" :class="{ active: tab === 'upload' }" @click="tab = 'upload'">
         {{ t('media.tabUpload') }}
       </button>
       <button class="tab" :class="{ active: tab === 'library' }" @click="tab = 'library'">
         {{ t('media.tabLibrary') }}
       </button>
-      <button
-        v-if="!isCommunity"
-        class="tab"
-        :class="{ active: tab === 'search' }"
-        @click="tab = 'search'"
-      >
+      <button class="tab" :class="{ active: tab === 'search' }" @click="tab = 'search'">
         {{ t('media.tabSearch') }}
+      </button>
+      <button
+        v-if="kind === 'image'"
+        class="tab"
+        :class="{ active: tab === 'canva' }"
+        data-test="tab-canva"
+        @click="openCanvaTab"
+      >
+        Canva
       </button>
       <button class="tab" :class="{ active: tab === 'link' }" @click="tab = 'link'">
         {{ t('media.tabLink') }}
       </button>
     </div>
 
-    <!-- 공유 이미지·동영상: 커뮤니티에 올려진 것에서 고른다. -->
-    <div v-if="tab === 'shared'" class="pane">
-      <p v-if="sharedLoading" class="hint">{{ t('common.loading') }}</p>
-      <p v-else-if="sharedError" class="error-text">{{ sharedError }}</p>
-      <p v-else-if="shared.length === 0" class="hint">{{ t('community.noMaterials') }}</p>
-
-      <div v-else class="asset-grid">
-        <button
-          v-for="row in shared"
-          :key="row.id"
-          class="asset"
-          type="button"
-          :title="row.title"
-          @click="emit('select', { src: row.asset.url, asset: row.asset })"
-        >
-          <img
-            v-if="row.asset.kind === 'image'"
-            class="asset-thumb"
-            :src="row.asset.thumb_url || row.asset.url"
-            alt=""
-          />
-          <span v-else class="asset-thumb video">🎬</span>
-          <span class="asset-name">{{ row.title }}</span>
-          <span class="muted small">{{ row.uploader_name ?? '-' }}</span>
-        </button>
-      </div>
-    </div>
-
     <!-- 업로드 -->
-    <div v-else-if="tab === 'upload'" class="pane">
+    <div v-if="tab === 'upload'" class="pane">
       <label
         class="drop"
         :class="{ over: dragOver }"
@@ -450,6 +496,71 @@ function chooseLink() {
         @select="emit('select', $event)"
         @select-many="emit('select-many', $event)"
       />
+    </div>
+
+    <!-- Canva: 계정을 연결해 내 디자인을 자산으로 가져온다. -->
+    <div v-else-if="tab === 'canva'" class="pane">
+      <p v-if="canvaError" class="error-text">{{ canvaError }}</p>
+
+      <p v-if="canvaStatus && !canvaStatus.configured" class="hint">
+        {{ t('media.canvaNotConfigured') }}
+      </p>
+
+      <template v-else-if="canvaStatus && !canvaStatus.connected">
+        <p class="hint">{{ t('media.canvaConnectHint') }}</p>
+        <button class="btn btn-primary" data-test="canva-connect" @click="connectCanva">
+          {{ t('media.canvaConnect') }}
+        </button>
+      </template>
+
+      <template v-else-if="canvaStatus">
+        <div class="canva-bar">
+          <input
+            v-model="canvaQuery"
+            class="input"
+            :placeholder="t('media.canvaSearch')"
+            @keyup.enter="loadCanvaDesigns()"
+          />
+          <button class="btn btn-sm" @click="loadCanvaDesigns()">{{ t('common.search') }}</button>
+          <button class="btn btn-sm" :title="t('media.canvaDisconnect')" @click="disconnectCanva">
+            ✕
+          </button>
+        </div>
+
+        <p v-if="canvaLoading && canvaDesigns.length === 0" class="hint">
+          {{ t('common.loading') }}
+        </p>
+        <p v-else-if="canvaDesigns.length === 0" class="hint">{{ t('media.canvaEmpty') }}</p>
+
+        <div v-else class="asset-grid">
+          <button
+            v-for="design in canvaDesigns"
+            :key="design.id"
+            class="asset"
+            type="button"
+            :disabled="canvaImporting !== null"
+            :title="design.title"
+            data-test="canva-design"
+            @click="importCanva(design)"
+          >
+            <img v-if="design.thumbnail_url" class="asset-thumb" :src="design.thumbnail_url" alt="" />
+            <span v-else class="asset-thumb">🎨</span>
+            <span class="asset-name">{{ design.title }}</span>
+            <span v-if="canvaImporting === design.id" class="muted small">
+              {{ t('media.canvaImporting') }}
+            </span>
+          </button>
+        </div>
+
+        <button
+          v-if="canvaContinuation"
+          class="btn btn-sm"
+          :disabled="canvaLoading"
+          @click="loadCanvaDesigns(true)"
+        >
+          {{ t('media.canvaMore') }}
+        </button>
+      </template>
     </div>
 
     <!-- 링크 -->
@@ -641,5 +752,15 @@ function chooseLink() {
 
 .warn {
   color: var(--warning);
+}
+
+.canva-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.canva-bar .input {
+  flex: 1;
 }
 </style>

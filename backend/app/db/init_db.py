@@ -24,7 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 def create_tables() -> None:
-    """개발/테스트 편의용. 운영에서는 Alembic 마이그레이션을 사용한다."""
+    """개발/테스트 편의용.
+
+    스키마의 주인은 .NET(backend-dotnet) EF Core 마이그레이션이다. 여기서는
+    빠진 테이블만 만들고(기존 테이블은 그대로), 컬럼 추가·변경은 EF
+    마이그레이션으로만 한다. 이 모델들은 같은 DB 를 읽는 거울이므로 EF 쪽
+    스키마가 바뀌면 함께 고쳐야 한다.
+    """
     Base.metadata.create_all(bind=engine)
 
 
@@ -65,6 +71,9 @@ def ensure_super_admin(db: Session, org: Organization) -> User:
 
 
 def init_db(db: Session) -> None:
+    from app.services.org_types import seed_defaults
+
+    seed_defaults(db)  # 기관구분 기본값(기관·학교·기타) — 비어 있을 때만.
     root = ensure_root_organization(db)
     ensure_super_admin(db, root)
     db.commit()

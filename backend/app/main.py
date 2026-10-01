@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    # 개발 편의를 위해 기동 시 테이블을 만든다.
-    # 운영에서는 Alembic 마이그레이션이 스키마를 관리하며, create_all 은
+    # 개발 편의를 위해 기동 시 빠진 테이블을 만든다.
+    # 스키마의 주인은 이제 .NET(backend-dotnet)의 EF Core 마이그레이션이다 —
+    # Alembic 은 d491ad229086 에서 동결됐다(alembic/FROZEN.txt). create_all 은
     # 이미 존재하는 테이블을 건드리지 않으므로 함께 두어도 안전하다.
     create_tables()
     with SessionLocal() as db:

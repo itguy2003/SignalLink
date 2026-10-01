@@ -147,6 +147,9 @@ export function itemsToBlocks(items) {
         contentId: item.content_id ?? null,
         contentName: item.content_name ?? null,
         durationSec: item.duration_sec ?? 10,
+        transition: item.transition ?? 'none',
+        transitionMs: item.transition_ms ?? 600,
+        noticeId: item.org_notice_id ?? null,
         inlineContent: inline,
         hasInline: hasInlineContent(inline),
       })
@@ -168,8 +171,11 @@ export function blocksToItems(blocks, loose = []) {
       end_time: toTimeString(block.end),
       sort_order: index,
       duration_sec: block.durationSec ?? 10,
-      content_id: block.contentId ?? null,
-      content: block.contentId ? {} : (block.inlineContent ?? {}),
+      transition: block.transition ?? 'none',
+      transition_ms: block.transitionMs ?? 600,
+      org_notice_id: block.noticeId ?? null,
+      content_id: block.noticeId ? null : (block.contentId ?? null),
+      content: block.noticeId || block.contentId ? {} : (block.inlineContent ?? {}),
     }))
 
   const fromLoose = loose.map((item, index) => ({
@@ -178,8 +184,11 @@ export function blocksToItems(blocks, loose = []) {
     end_time: item.end_time ?? null,
     sort_order: fromBlocks.length + index,
     duration_sec: item.duration_sec ?? 10,
-    content_id: item.content_id ?? null,
-    content: item.content_id ? {} : (item.content ?? {}),
+    transition: item.transition ?? 'none',
+    transition_ms: item.transition_ms ?? 600,
+    org_notice_id: item.org_notice_id ?? null,
+    content_id: item.org_notice_id ? null : (item.content_id ?? null),
+    content: item.org_notice_id || item.content_id ? {} : (item.content ?? {}),
   }))
 
   return [...fromBlocks, ...fromLoose]
@@ -219,6 +228,7 @@ export function createBlock({ day, start, end, grid }) {
       contentId: null,
       contentName: null,
       durationSec: 10,
+      noticeId: null,
       inlineContent: null,
       hasInline: false,
     },
@@ -228,5 +238,5 @@ export function createBlock({ day, start, end, grid }) {
 
 /** 이 블록이 표출할 것을 갖고 있는가(참조든 인라인이든). */
 export function blockHasContent(block) {
-  return Boolean(block.contentId) || Boolean(block.hasInline)
+  return Boolean(block.contentId) || Boolean(block.noticeId) || Boolean(block.hasInline)
 }

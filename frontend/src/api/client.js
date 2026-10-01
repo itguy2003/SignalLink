@@ -53,6 +53,19 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+/**
+ * 장치 토큰(플레이어 전용).
+ *
+ * 플레이어는 사용자 로그인 없이 장치 자격(X-Device-Token)으로 서버와
+ * 말한다. 설정해 두면 모든 요청에 실린다 — 위젯 데이터처럼 사용자/장치
+ * 겸용 API 가 장치 쪽 자격으로 동작하게 된다.
+ */
+let deviceToken = null
+
+export function setDeviceToken(token) {
+  deviceToken = token || null
+}
+
 function buildQuery(params) {
   if (!params) return ''
   const search = new URLSearchParams()
@@ -98,6 +111,7 @@ async function send(method, path, { body, params, raw } = {}) {
   const headers = {}
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
+  if (deviceToken) headers['X-Device-Token'] = deviceToken
 
   let payload
   if (raw) {

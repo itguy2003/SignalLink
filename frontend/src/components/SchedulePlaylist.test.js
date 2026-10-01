@@ -131,6 +131,32 @@ describe('항목 편집', () => {
     expect(items[0].duration_sec).toBe(1)
   })
 
+  it('전환 효과를 고르면 항목에 반영되고 변경을 알린다', async () => {
+    const items = [entry(1, 'A'), entry(2, 'B')]
+    const wrapper = mountList(items)
+
+    await wrapper.findAll('.transition .select')[1].setValue('fade')
+    expect(items[1].transition).toBe('fade')
+    expect(wrapper.emitted('change')).toBeTruthy()
+  })
+
+  it('전환 시간이 표출 시간을 넘으면 경고한다', () => {
+    // 3초 칸에 5초 전환 — 효과가 끝나기 전에 다음으로 넘어간다.
+    const items = [{ ...entry(1, 'A', 3), transition: 'fade', transition_ms: 5000 }]
+    const wrapper = mountList(items)
+
+    expect(wrapper.find('.warn').exists()).toBe(true)
+    expect(wrapper.find('.transition').classes()).toContain('bad')
+  })
+
+  it('모두 적용을 고르면 전체 항목의 전환이 바뀐다', async () => {
+    const items = [entry(1, 'A'), entry(2, 'B')]
+    const wrapper = mountList(items)
+
+    await wrapper.find('.apply-all').setValue('dissolve')
+    expect(items.map((i) => i.transition)).toEqual(['dissolve', 'dissolve'])
+  })
+
   it('삭제하면 목록에서 빠진다', async () => {
     const items = [entry(1, 'A'), entry(2, 'B')]
     const wrapper = mountList(items)

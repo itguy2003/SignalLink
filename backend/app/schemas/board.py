@@ -8,6 +8,8 @@ from app.models.enums import BoardKind
 
 
 class OrgBoardBase(BaseModel):
+    #: 운영자가 알아보는 이름표. 표시용이다.
+    name: str = Field(default="", max_length=200)
     kind: BoardKind = BoardKind.BOARD
     url: str = Field(min_length=1, max_length=1000)
     scrape_method: str | None = Field(default=None, max_length=50)
@@ -18,6 +20,7 @@ class OrgBoardCreate(OrgBoardBase):
 
 
 class OrgBoardUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
     kind: BoardKind | None = None
     url: str | None = Field(default=None, min_length=1, max_length=1000)
     scrape_method: str | None = Field(default=None, max_length=50)

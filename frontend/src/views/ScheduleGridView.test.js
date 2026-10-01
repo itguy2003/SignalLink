@@ -65,6 +65,25 @@ const get = vi.fn(async (path) => {
       { key: 'meal', name: '급식메뉴', category: '기능형', description: '오늘의 급식', default_size: { w: 500, h: 600 }, options: [] },
     ]
   }
+  if (path === '/org-notices') {
+    return [
+      { id: 9, name: '가정통신', start_date: null, end_date: null, item_count: 2, org_name: '가온초' },
+      { id: 10, name: '교육청 안내', start_date: null, end_date: null, item_count: 1, org_name: '가온교육청' },
+    ]
+  }
+  if (path === '/org-notices/9') {
+    return {
+      id: 9,
+      name: '가정통신',
+      start_date: null,
+      end_date: null,
+      item_count: 2,
+      items: [
+        { id: 91, sort_order: 1, duration_sec: 12, document: { version: 1, layout: { width: 1920, height: 1080 }, elements: [{ id: 'b' }] } },
+        { id: 90, sort_order: 0, duration_sec: 8, document: { version: 1, layout: { width: 1920, height: 1080 }, elements: [{ id: 'a' }] } },
+      ],
+    }
+  }
   if (path.startsWith('/contents/')) {
     return { id: Number(path.split('/')[2]), document: contentDocuments[path.split('/')[2]] ?? {} }
   }
@@ -621,6 +640,18 @@ describe('주간 표에 드롭', () => {
   })
 })
 
+/** 임의 페이로드의 라이브러리 드래그. */
+function dragEventWith(payload) {
+  return {
+    dataTransfer: {
+      types: ['application/x-signallink-content'],
+      getData: () => JSON.stringify(payload),
+      dropEffect: '',
+    },
+    preventDefault: () => {},
+  }
+}
+
 describe('목록반복 스케줄', () => {
   const loopSchedule = {
     id: 2,
@@ -660,6 +691,70 @@ describe('목록반복 스케줄', () => {
     expect(wrapper.findAll('.playlist .item')).toHaveLength(2)
   })
 
+  it('소속기관 공지를 고르면 참조 한 줄로 담긴다', async () => {
+    loaded.value = loopSchedule
+    const wrapper = await mountView()
+
+    await wrapper.find('[data-test="add-notice"]').trigger('click')
+    await flushPromises()
+
+    // 스케줄 기관 기준으로 상위기관 공지까지 함께 조회한다(for_org).
+    expect(get).toHaveBeenCalledWith('/org-notices', { for_org: loopSchedule.org_id })
+    // 상위기관이 내린 공지는 발행 기관 이름이 붙는다.
+    const rowTexts = wrapper.findAll('[data-test="notice-row"]').map((r) => r.text())
+    expect(rowTexts[1]).toContain('교육청 안내')
+    expect(rowTexts[1]).toContain('가온교육청')
+
+    await wrapper.find('[data-test="notice-row"] .btn').trigger('click')
+    await flushPromises()
+
+    // 사본이 아니라 **참조 한 줄** — 공지를 고치면 자동으로 반영된다.
+    const rows = wrapper.findAll('.playlist .item')
+    expect(rows).toHaveLength(2)
+    expect(rows[1].text()).toContain('가정통신')
+    expect(rows[1].text()).toContain('공지 참조')
+    // 유지 시간은 공지의 각 장이 정한다 — 여기서는 잠근다.
+    expect(rows[1].find('.duration .input').attributes('disabled')).toBeDefined()
+
+    // 저장에는 공지 id 만 실려 나간다.
+    await wrapper.find('.head .btn-primary').trigger('click')
+    await flushPromises()
+    const [, body] = put.mock.calls[0]
+    expect(body.items).toHaveLength(2)
+    expect(body.items[1].org_notice_id).toBe(9)
+    expect(body.items[1].content_id).toBeNull()
+    expect(body.items[1].content).toEqual({})
+  })
+
+  it('공지 탭에는 상위기관 공지가 카드로 나온다', async () => {
+    loaded.value = loopSchedule
+    const wrapper = await mountView()
+
+    await wrapper.find('[data-test="tab-notice"]').trigger('click')
+    await flushPromises()
+
+    // 스케줄 기관 기준으로 상위기관 것까지 조회한다.
+    expect(get).toHaveBeenCalledWith('/org-notices', { for_org: loopSchedule.org_id })
+    const rows = wrapper.findAll('[data-test="notice-item"]')
+    expect(rows.map((r) => r.text()).join(' ')).toContain('교육청 안내')
+    // 카드 자체를 끌어 담는다.
+    expect(rows[0].attributes('draggable')).toBe('true')
+  })
+
+  it('공지 카드를 재생 목록에 떨어뜨리면 참조로 담긴다', async () => {
+    loaded.value = loopSchedule
+    const wrapper = await mountView()
+
+    const payload = { kind: 'org-notice', id: 9, name: '가정통신' }
+    await wrapper.find('.tail-drop').trigger('drop', dragEventWith(payload))
+    await flushPromises()
+
+    const rows = wrapper.findAll('.playlist .item')
+    expect(rows).toHaveLength(2)
+    expect(rows[1].text()).toContain('가정통신')
+    expect(rows[1].text()).toContain('공지 참조')
+  })
+
   it('저장하면 순서대로 sort_order 를 매긴다', async () => {
     loaded.value = loopSchedule
     const wrapper = await mountView()
@@ -694,7 +789,7 @@ describe('위젯 탭', () => {
   it('콘텐츠·위젯·재생목록을 탭으로 나눈다', async () => {
     const wrapper = await mountView()
     const tabs = wrapper.findAll('.library-panel .tab').map((b) => b.text())
-    expect(tabs).toEqual(['콘텐츠', '위젯', '재생목록'])
+    expect(tabs).toEqual(['콘텐츠', '위젯', '재생목록', '공지'])
   })
 
   it('위젯 탭으로 바꾸면 위젯 목록이 나온다', async () => {
@@ -764,28 +859,32 @@ describe('재생목록을 스케줄에 놓기', () => {
   const playlistDrag = () =>
     widgetDrag({ kind: 'playlist', id: 4, name: '현관 순환' })
 
-  it('그 재생목록이 화면을 꽉 채우는 콘텐츠를 만든다', async () => {
-    // 스케줄 아이템은 언제나 콘텐츠를 가리킨다. 위젯과 같은 방식이다.
+  it('라이브러리 콘텐츠를 만들지 않는다', async () => {
+    // 스케줄에 넣었다는 이유만으로 콘텐츠 목록에 등록되면 안 된다 —
+    // 아이템이 인라인 문서를 직접 든다.
     const wrapper = await mountView()
     await wrapper.findAll('.day-col')[2].trigger('drop', playlistDrag())
     await flushPromises()
 
-    const [path, body] = post.mock.calls[0]
-    expect(path).toBe('/contents')
-    expect(body.name).toBe('현관 순환')
-    expect(body.document.elements[0].type).toBe('playlist')
-    expect(body.document.elements[0].rect).toMatchObject({ x: 0, y: 0, w: 1920, h: 1080 })
+    expect(post.mock.calls.filter(([path]) => path === '/contents')).toHaveLength(0)
   })
 
-  it('문서에는 참조만 남긴다', async () => {
+  it('저장 시 인라인 문서로 실려 가고, 문서에는 참조만 남긴다', async () => {
     // 재생목록을 고치면 다시 저장하지 않아도 이 스케줄에 반영돼야 한다.
     const wrapper = await mountView()
     await wrapper.findAll('.day-col')[2].trigger('drop', playlistDrag())
     await flushPromises()
 
-    const options = post.mock.calls[0][1].document.elements[0].options
-    expect(options.playlist_id).toBe(4)
-    expect(options.items).toBeUndefined()
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
+
+    const items = put.mock.calls[0][1].items
+    const inline = items.find((item) => item.content?.elements?.length)
+    expect(inline.content_id).toBeNull()
+    expect(inline.content.elements[0].type).toBe('playlist')
+    expect(inline.content.elements[0].options.playlist_id).toBe(4)
+    expect(inline.content.elements[0].options.items).toBeUndefined()
+    expect(inline.content.elements[0].rect).toMatchObject({ x: 0, y: 0, w: 1920, h: 1080 })
   })
 
   it('스케줄 방향에 맞춰 감싼다', async () => {
@@ -795,12 +894,16 @@ describe('재생목록을 스케줄에 놓기', () => {
     await wrapper.findAll('.day-col')[2].trigger('drop', playlistDrag())
     await flushPromises()
 
-    const body = post.mock.calls[0][1]
-    expect(body.width).toBe(1080)
-    expect(body.document.elements[0].rect).toMatchObject({ w: 1080, h: 1920 })
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
+
+    const items = put.mock.calls[0][1].items
+    const inline = items.find((item) => item.content?.elements?.length)
+    expect(inline.content.layout).toMatchObject({ width: 1080, height: 1920 })
+    expect(inline.content.elements[0].rect).toMatchObject({ w: 1080, h: 1920 })
   })
 
-  it('만든 콘텐츠가 블록에 붙는다', async () => {
+  it('블록에 이름이 붙는다', async () => {
     const wrapper = await mountView()
     await wrapper.findAll('.day-col')[2].trigger('drop', playlistDrag())
     await flushPromises()
@@ -809,104 +912,19 @@ describe('재생목록을 스케줄에 놓기', () => {
   })
 })
 
-describe('감싼 콘텐츠 재사용', () => {
-  const clockDrag = () => widgetDrag()
-
-  it('같은 위젯을 두 번 놓아도 콘텐츠는 하나만 만든다', async () => {
-    // 놓을 때마다 새로 만들면 똑같은 콘텐츠가 라이브러리에 쌓인다.
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', clockDrag())
-    await flushPromises()
-    await wrapper.findAll('.day-col')[3].trigger('drop', clockDrag())
-    await flushPromises()
-
-    expect(post).toHaveBeenCalledTimes(1)
-  })
-
-  it('이미 만들어 둔 것이 있으면 그것을 쓴다', async () => {
-    // 편집기를 다시 열어도 사본이 늘면 안 된다.
-    extraContents = [
-      { id: 21, name: '시계', width: 1920, height: 1080, element_count: 1, background: '#000' },
-    ]
-    contentDocuments['21'] = {
-      elements: [{ type: 'widget', widget_key: 'clock' }],
-    }
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', clockDrag())
-    await flushPromises()
-
-    expect(post).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('시계')
-  })
-
-  it('이름만 같고 내용이 다르면 새로 만든다', async () => {
-    extraContents = [
-      { id: 22, name: '시계', width: 1920, height: 1080, element_count: 1, background: '#000' },
-    ]
-    contentDocuments['22'] = { elements: [{ type: 'text' }] }
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', clockDrag())
-    await flushPromises()
-
-    expect(post).toHaveBeenCalledTimes(1)
-  })
-
-  it('방향이 다르면 다시 만든다', async () => {
-    // 가로형과 세로형은 서로 다른 콘텐츠다.
-    extraContents = [
-      { id: 23, name: '시계', width: 1080, height: 1920, element_count: 1, background: '#000' },
-    ]
-    contentDocuments['23'] = { elements: [{ type: 'widget', widget_key: 'clock' }] }
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', clockDrag())
-    await flushPromises()
-
-    expect(post).toHaveBeenCalledTimes(1)
-  })
-
-  it('재생목록도 같은 규칙을 따른다', async () => {
-    extraContents = [
-      { id: 24, name: '현관 순환', width: 1920, height: 1080, element_count: 1, background: '#000' },
-    ]
-    contentDocuments['24'] = {
-      elements: [{ type: 'playlist', options: { playlist_id: 4 } }],
-    }
-    const wrapper = await mountView()
-    await wrapper
-      .findAll('.day-col')[2]
-      .trigger('drop', widgetDrag({ kind: 'playlist', id: 4, name: '현관 순환' }))
-    await flushPromises()
-
-    expect(post).not.toHaveBeenCalled()
-  })
-})
-
 describe('위젯을 스케줄에 놓기', () => {
-  it('위젯을 놓으면 전체 화면을 채우는 콘텐츠를 만든다', async () => {
+  it('라이브러리 콘텐츠를 만들지 않는다', async () => {
+    // 스케줄에 넣었다는 이유만으로 콘텐츠 목록에 등록되면 안 된다 —
+    // 아이템이 인라인 문서를 직접 든다.
     const wrapper = await mountView()
     await wrapper.findAll('.day-col')[2].trigger('drop', widgetDrag())
     await flushPromises()
 
-    expect(post).toHaveBeenCalledTimes(1)
-    const [path, body] = post.mock.calls[0]
-    expect(path).toBe('/contents')
-    expect(body.name).toBe('시계')
-
-    // 위젯 하나가 캔버스를 꽉 채운다.
-    const element = body.document.elements[0]
-    expect(element.widget_key).toBe('clock')
-    expect(element.rect).toMatchObject({ x: 0, y: 0, w: 1920, h: 1080 })
-  })
-
-  it('만들어진 콘텐츠가 블록에 붙는다', async () => {
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', widgetDrag())
-    await flushPromises()
-
+    expect(post.mock.calls.filter(([path]) => path === '/contents')).toHaveLength(0)
     expect(wrapper.text()).toContain('시계')
   })
 
-  it('저장하면 감싼 콘텐츠의 id 로 나간다', async () => {
+  it('저장하면 위젯 하나가 화면을 꽉 채우는 인라인 문서로 나간다', async () => {
     const wrapper = await mountView()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
 
@@ -916,11 +934,15 @@ describe('위젯을 스케줄에 놓기', () => {
     await flushPromises()
 
     const [, body] = put.mock.calls[0]
-    expect(body.items.some((i) => i.content_id === 99 && i.day_of_week === 2)).toBe(true)
+    const inline = body.items.find((i) => i.content?.elements?.length)
+    expect(inline.day_of_week).toBe(2)
+    expect(inline.content_id).toBeNull()
+    const element = inline.content.elements[0]
+    expect(element.widget_key).toBe('clock')
+    expect(element.rect).toMatchObject({ x: 0, y: 0, w: 1920, h: 1080 })
   })
 
-  it('겹치는 자리면 콘텐츠를 만들지 않는다', async () => {
-    // 실패할 배치 때문에 쓰이지 않는 콘텐츠가 쌓이면 안 된다.
+  it('겹치는 자리면 아무것도 만들지 않는다', async () => {
     const wrapper = await mountView()
     await wrapper.findAll('.day-col')[0].trigger('drop', widgetDrag())
     await flushPromises()
@@ -928,32 +950,35 @@ describe('위젯을 스케줄에 놓기', () => {
     expect(post).not.toHaveBeenCalled()
   })
 
+  it('카드가 실어 온 크기가 아니라 스케줄 방향을 따른다', async () => {
+    // 세로 크기를 달고 온 위젯이라도 가로 스케줄이면 가로로 감싼다.
+    const wrapper = await mountView()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.findAll('.day-col')[2].trigger('drop', widgetDrag({
+      kind: 'widget', key: 'meal', name: '급식메뉴', width: 1080, height: 1920,
+    }))
+    await flushPromises()
+    await wrapper.find('.head .btn-primary').trigger('click')
+    await flushPromises()
+
+    const inline = put.mock.calls[0][1].items.find((i) => i.content?.elements?.length)
+    expect(inline.content.layout).toMatchObject({ width: 1920, height: 1080 })
+  })
+
   it('세로형 스케줄에서는 세로 크기로 감싼다', async () => {
     loaded.value = { ...schedule, orientation: 'PORTRAIT', items: [] }
     const wrapper = await mountView()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     await wrapper.findAll('.day-col')[2].trigger('drop', widgetDrag({
       kind: 'widget', key: 'meal', name: '급식메뉴', width: 1080, height: 1920,
     }))
     await flushPromises()
-
-    const [, body] = post.mock.calls[0]
-    expect(body.width).toBe(1080)
-    expect(body.height).toBe(1920)
-    expect(body.document.elements[0].rect).toMatchObject({ w: 1080, h: 1920 })
-  })
-
-  it('카드가 실어 온 크기가 아니라 스케줄 방향을 따른다', async () => {
-    // 세로 크기를 달고 온 위젯이라도 가로 스케줄이면 가로로 감싼다.
-    // 카드 값을 그대로 믿으면 쓰이지도 못할 방향 불일치 콘텐츠가 남는다.
-    const wrapper = await mountView()
-    await wrapper.findAll('.day-col')[2].trigger('drop', widgetDrag({
-      kind: 'widget', key: 'meal', name: '급식메뉴', width: 1080, height: 1920,
-    }))
+    await wrapper.find('.head .btn-primary').trigger('click')
     await flushPromises()
 
-    const [, body] = post.mock.calls[0]
-    expect(body.width).toBe(1920)
-    expect(body.height).toBe(1080)
+    const inline = put.mock.calls[0][1].items.find((i) => i.content?.elements?.length)
+    expect(inline.content.layout).toMatchObject({ width: 1080, height: 1920 })
+    expect(inline.content.elements[0].rect).toMatchObject({ w: 1080, h: 1920 })
   })
 
   it('재생 목록에도 위젯을 놓을 수 있다', async () => {
@@ -966,7 +991,7 @@ describe('위젯을 스케줄에 놓기', () => {
     await wrapper.find('.drop-zone').trigger('drop', widgetDrag())
     await flushPromises()
 
-    expect(post).toHaveBeenCalledTimes(1)
+    expect(post).not.toHaveBeenCalled()
     expect(wrapper.findAll('.playlist .item')).toHaveLength(1)
     expect(wrapper.text()).toContain('시계')
   })

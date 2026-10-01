@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api/client'
 import DeviceCollection from '@/components/DeviceCollection.vue'
 import DeviceGroupPanel from '@/components/DeviceGroupPanel.vue'
+import DeviceScheduleDialog from '@/components/DeviceScheduleDialog.vue'
 import ModalDialog from '@/components/ModalDialog.vue'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -247,6 +248,15 @@ async function remove(device) {
   }
 }
 
+/** 분할 배정 창의 대상 장치. null 이면 닫혀 있다. */
+const scheduleTarget = ref(null)
+
+async function saveSchedules(scheduleIds) {
+  const device = scheduleTarget.value
+  scheduleTarget.value = null
+  await assignSchedule(device, scheduleIds)
+}
+
 async function assignSchedule(device, scheduleIds) {
   try {
     await api.put(`/devices/${device.id}/schedules`, { schedule_ids: scheduleIds })
@@ -404,7 +414,7 @@ function toggleDelegateUser(id) {
       @edit="openEdit"
       @delegate="openDelegate"
       @remove="remove"
-      @assign="assignSchedule($event.device, $event.scheduleIds)"
+      @edit-schedules="scheduleTarget = $event"
       @command="onCardCommand"
       @refresh="onCardRefresh"
     />
@@ -495,7 +505,7 @@ function toggleDelegateUser(id) {
         @edit="openEdit"
         @delegate="openDelegate"
         @remove="remove"
-        @assign="assignSchedule($event.device, $event.scheduleIds)"
+        @edit-schedules="scheduleTarget = $event"
         @command="onCardCommand"
         @refresh="onCardRefresh"
       />
@@ -680,6 +690,15 @@ function toggleDelegateUser(id) {
 
       <p v-if="formError" class="error-text">{{ formError }}</p>
     </ModalDialog>
+
+    <!-- 스케줄 배정 — 좌(스케줄 목록)/우(주간·목록 표시) 분할 창. -->
+    <DeviceScheduleDialog
+      v-if="scheduleTarget"
+      :device="scheduleTarget"
+      :schedules="schedules"
+      @close="scheduleTarget = null"
+      @save="saveSchedules"
+    />
   </div>
 </template>
 

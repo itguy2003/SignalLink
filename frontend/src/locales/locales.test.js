@@ -125,9 +125,10 @@ describe('번역 품질', () => {
    * 언어는 한국어 한자어와 표기가 겹치는 낱말이 많아, 언어별로 따로 둔다.
    */
   const SAME_OK = {
-    en: ['app.name', 'app.edition', 'device.cpu', 'transition.ms'],
-    ja: ['app.name', 'app.edition', 'device.cpu', 'transition.ms'],
-    zh: ['app.name', 'app.edition', 'device.cpu'],
+    // board.urlPlaceholder('https://…')는 언어 중립인 URL 형태 안내다.
+    en: ['app.name', 'app.edition', 'device.cpu', 'transition.ms', 'board.urlPlaceholder'],
+    ja: ['app.name', 'app.edition', 'device.cpu', 'transition.ms', 'board.urlPlaceholder'],
+    zh: ['app.name', 'app.edition', 'device.cpu', 'board.urlPlaceholder'],
   }
 
   for (const [code, messages] of Object.entries(TRANSLATIONS)) {

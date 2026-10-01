@@ -1,0 +1,552 @@
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (9ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "name" = '__EFMigrationsHistory' AND "type" = 'table';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "MigrationId", "ProductVersion"
+      FROM "__EFMigrationsHistory"
+      ORDER BY "MigrationId";
+info: Microsoft.EntityFrameworkCore.Migrations[20411]
+      Acquiring an exclusive lock for migration application. See https://aka.ms/efcore-docs-migrations-lock for more information if this takes too long.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "name" = '__EFMigrationsLock' AND "type" = 'table';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (8ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      INSERT OR IGNORE INTO "__EFMigrationsLock"("Id", "Timestamp") VALUES(1, '2026-09-22 06:47:54.071039+00:00');
+      SELECT changes();
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+          "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
+          "ProductVersion" TEXT NOT NULL
+      );
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "name" = '__EFMigrationsHistory' AND "type" = 'table';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "MigrationId", "ProductVersion"
+      FROM "__EFMigrationsHistory"
+      ORDER BY "MigrationId";
+info: Microsoft.EntityFrameworkCore.Migrations[20405]
+      No migrations were applied. The database is already up to date.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (7ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      DELETE FROM "__EFMigrationsLock";
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "org_type" AS "o")
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (9ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."parent_id" IS NULL
+      ORDER BY "o"."id"
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@adminId='?' (Size = 5)], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "app_user" AS "a"
+          WHERE "a"."user_id" = @adminId)
+warn: Microsoft.AspNetCore.DataProtection.Repositories.EphemeralXmlRepository[50]
+      Using an in-memory repository. Keys will not be persisted to storage.
+warn: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[59]
+      Neither user profile nor HKLM registry available. Using an ephemeral key repository. Protected data will be unavailable when application exits.
+warn: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[35]
+      No XML encryptor configured. Key {c076cdbc-7227-4deb-936b-e5ba9ee6668e} may be persisted to storage in unencrypted form.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+      LIMIT @p
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@payload_UserId='?' (Size = 5)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."user_id" = @payload_UserId
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (11ms) [Parameters=[@p0='?' (Size = 5), @p1='?' (DbType = DateTime), @p2='?' (Size = 3), @p3='?', @p4='?' (DbType = Boolean), @p5='?' (Size = 111), @p6='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "login_log" ("attempted_user_id", "created_at", "ip_address", "reason", "success", "user_agent", "user_id")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)
+      RETURNING "id";
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "schedule" AS "s"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "device" AS "d"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Int32), @p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."id", "s"."created_at", "s"."created_by", "s"."end_at", "s"."kind", "s"."name", "s"."org_id", "s"."orientation", "s"."start_at", "s"."updated_at", "s"."version"
+      FROM "schedule" AS "s"
+      ORDER BY "s"."id" DESC
+      LIMIT @p1 OFFSET @p
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Int32), @p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "d1"."id", "d1"."app_version", "d1"."class_name", "d1"."class_no", "d1"."cpu", "d1"."created_at", "d1"."device_code", "d1"."device_kind", "d1"."form_factor", "d1"."grade", "d1"."height", "d1"."is_master", "d1"."last_seen_at", "d1"."memory", "d1"."name", "d1"."org_id", "d1"."os", "d1"."panel_type", "d1"."place_kind", "d1"."place_name", "d1"."storage", "d1"."storage_free_bytes", "d1"."storage_reported_at", "d1"."storage_total_bytes", "d1"."track", "d1"."updated_at", "d1"."version", "d1"."width", "s0"."id", "s0"."device_id", "s0"."schedule_id", "s0"."sort_order", "s0"."id0", "s0"."created_at", "s0"."created_by", "s0"."end_at", "s0"."kind", "s0"."name", "s0"."org_id", "s0"."orientation", "s0"."start_at", "s0"."updated_at", "s0"."version"
+      FROM (
+          SELECT "d"."id", "d"."app_version", "d"."class_name", "d"."class_no", "d"."cpu", "d"."created_at", "d"."device_code", "d"."device_kind", "d"."form_factor", "d"."grade", "d"."height", "d"."is_master", "d"."last_seen_at", "d"."memory", "d"."name", "d"."org_id", "d"."os", "d"."panel_type", "d"."place_kind", "d"."place_name", "d"."storage", "d"."storage_free_bytes", "d"."storage_reported_at", "d"."storage_total_bytes", "d"."track", "d"."updated_at", "d"."version", "d"."width"
+          FROM "device" AS "d"
+          ORDER BY "d"."id" DESC
+          LIMIT @p1 OFFSET @p
+      ) AS "d1"
+      LEFT JOIN (
+          SELECT "d0"."id", "d0"."device_id", "d0"."schedule_id", "d0"."sort_order", "s"."id" AS "id0", "s"."created_at", "s"."created_by", "s"."end_at", "s"."kind", "s"."name", "s"."org_id", "s"."orientation", "s"."start_at", "s"."updated_at", "s"."version"
+          FROM "device_schedule" AS "d0"
+          INNER JOIN "schedule" AS "s" ON "d0"."schedule_id" = "s"."id"
+      ) AS "s0" ON "d1"."id" = "s0"."device_id"
+      ORDER BY "d1"."id" DESC, "s0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "app_user" AS "a"
+      WHERE "a"."status" = '미승인'
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."category", "o"."classifications", "o"."created_at", "o"."name", "o"."updated_at"
+      FROM "org_type" AS "o"
+      ORDER BY "o"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@row_Name='?' (Size = 2)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "organization" AS "o"
+      WHERE "o"."org_type" = @row_Name
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@row_Name='?' (Size = 2)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "organization" AS "o"
+      WHERE "o"."org_type" = @row_Name
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@row_Name='?' (Size = 2)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "organization" AS "o"
+      WHERE "o"."org_type" = @row_Name
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@targetOrg='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."created_at", "o"."kind", "o"."last_scraped_at", "o"."name", "o"."org_id", "o"."scrape_count", "o"."scrape_method", "o"."scrape_result", "o"."updated_at", "o"."url"
+      FROM "org_board" AS "o"
+      WHERE "o"."org_id" = @targetOrg
+      ORDER BY "o"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@targetOrg='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."created_at", "o"."kind", "o"."last_scraped_at", "o"."name", "o"."org_id", "o"."scrape_count", "o"."scrape_method", "o"."scrape_result", "o"."updated_at", "o"."url"
+      FROM "org_board" AS "o"
+      WHERE "o"."org_id" = @targetOrg
+      ORDER BY "o"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@target='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."created_at", "o"."created_by", "o"."end_date", "o"."name", "o"."org_id", "o"."start_date", "o"."updated_at", "o"."version", "o0"."id", "o0"."document", "o0"."duration_sec", "o0"."notice_id", "o0"."sort_order"
+      FROM "org_notice" AS "o"
+      LEFT JOIN "org_notice_item" AS "o0" ON "o"."id" = "o0"."notice_id"
+      WHERE "o"."org_id" = @target
+      ORDER BY "o"."updated_at" DESC, "o"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@target='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."created_at", "o"."created_by", "o"."end_date", "o"."name", "o"."org_id", "o"."start_date", "o"."updated_at", "o"."version", "o0"."id", "o0"."document", "o0"."duration_sec", "o0"."notice_id", "o0"."sort_order"
+      FROM "org_notice" AS "o"
+      LEFT JOIN "org_notice_item" AS "o0" ON "o"."id" = "o0"."notice_id"
+      WHERE "o"."org_id" = @target
+      ORDER BY "o"."updated_at" DESC, "o"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      ORDER BY "o"."name"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "content" AS "c"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Int32), @p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."id", "c"."created_at", "c"."created_by", "c"."description", "c"."document", "c"."height", "c"."name", "c"."org_id", "c"."share_scope", "c"."updated_at", "c"."version", "c"."width"
+      FROM "content" AS "c"
+      ORDER BY "c"."updated_at" DESC
+      LIMIT @p1 OFFSET @p
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (10ms) [Parameters=[@p0='?' (DbType = DateTime), @p1='?' (DbType = Int32), @p2='?' (Size = 10), @p3='?' (Size = 88), @p4='?' (DbType = Int32), @p5='?' (Size = 4), @p6='?' (DbType = Int32), @p7='?' (Size = 2), @p8='?' (DbType = DateTime), @p9='?' (DbType = Int32), @p10='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "content" ("created_at", "created_by", "description", "document", "height", "name", "org_id", "share_scope", "updated_at", "version", "width")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10)
+      RETURNING "id";
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@contentId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "schedule_item" AS "s"
+      WHERE "s"."content_id" = @contentId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "c"."id", "c"."created_at", "c"."created_by", "c"."description", "c"."document", "c"."height", "c"."name", "c"."org_id", "c"."share_scope", "c"."updated_at", "c"."version", "c"."width"
+      FROM "content" AS "c"
+      WHERE "c"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@contentId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "schedule_item" AS "s"
+      WHERE "s"."content_id" = @contentId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "playlist" AS "p"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Int32), @p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "p1"."id", "p1"."created_at", "p1"."created_by", "p1"."description", "p1"."name", "p1"."org_id", "p1"."updated_at", "p1"."version", "p0"."id", "p0"."duration_sec", "p0"."options", "p0"."playlist_id", "p0"."sort_order", "p0"."transition", "p0"."transition_ms", "p0"."widget_key"
+      FROM (
+          SELECT "p"."id", "p"."created_at", "p"."created_by", "p"."description", "p"."name", "p"."org_id", "p"."updated_at", "p"."version"
+          FROM "playlist" AS "p"
+          ORDER BY "p"."updated_at" DESC
+          LIMIT @p1 OFFSET @p
+      ) AS "p1"
+      LEFT JOIN "playlist_item" AS "p0" ON "p1"."id" = "p0"."playlist_id"
+      ORDER BY "p1"."updated_at" DESC, "p1"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@kind='?' (Size = 5)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "asset" AS "a"
+      WHERE "a"."kind" = @kind
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@kind='?' (Size = 5), @p2='?' (DbType = Int32), @p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a"."id", "a"."content_type", "a"."created_at", "a"."filename", "a"."kind", "a"."org_id", "a"."size_bytes", "a"."storage_path", "a"."thumb_path", "a"."updated_at", "a"."uploaded_by"
+      FROM "asset" AS "a"
+      WHERE "a"."kind" = @kind
+      ORDER BY "a"."created_at" DESC
+      LIMIT @p2 OFFSET @p
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@id='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "a0"."id", "a0"."created_at", "a0"."email", "a0"."name", "a0"."org_id", "a0"."password_hash", "a0"."phone", "a0"."status", "a0"."updated_at", "a0"."user_id", "u"."id", "u"."role", "u"."user_id"
+      FROM (
+          SELECT "a"."id", "a"."created_at", "a"."email", "a"."name", "a"."org_id", "a"."password_hash", "a"."phone", "a"."status", "a"."updated_at", "a"."user_id"
+          FROM "app_user" AS "a"
+          WHERE "a"."id" = @id
+          LIMIT 2
+      ) AS "a0"
+      LEFT JOIN "user_role" AS "u" ON "a0"."id" = "u"."user_id"
+      ORDER BY "a0"."id"
+warn: Microsoft.EntityFrameworkCore.Query[20504]
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w => w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (9ms) [Parameters=[@contentId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "c2"."id", "c2"."created_at", "c2"."created_by", "c2"."description", "c2"."document", "c2"."height", "c2"."name", "c2"."org_id", "c2"."share_scope", "c2"."updated_at", "c2"."version", "c2"."width", "c0"."id", "c0"."asset_id", "c0"."content_id", "c1"."id", "c1"."content_id", "c1"."playlist_id"
+      FROM (
+          SELECT "c"."id", "c"."created_at", "c"."created_by", "c"."description", "c"."document", "c"."height", "c"."name", "c"."org_id", "c"."share_scope", "c"."updated_at", "c"."version", "c"."width"
+          FROM "content" AS "c"
+          WHERE "c"."id" = @contentId
+          LIMIT 2
+      ) AS "c2"
+      LEFT JOIN "content_asset" AS "c0" ON "c2"."id" = "c0"."content_id"
+      LEFT JOIN "content_playlist" AS "c1" ON "c2"."id" = "c1"."content_id"
+      ORDER BY "c2"."id", "c0"."id"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@contentId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT DISTINCT "s"."schedule_id"
+      FROM "schedule_item" AS "s"
+      WHERE "s"."content_id" = @contentId
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "s"."id", "s"."created_at", "s"."created_by", "s"."end_at", "s"."kind", "s"."name", "s"."org_id", "s"."orientation", "s"."start_at", "s"."updated_at", "s"."version"
+      FROM "schedule" AS "s"
+      WHERE 0
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p3='?' (DbType = Int32), @p0='?' (Size = 258), @p1='?' (DbType = DateTime), @p2='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      UPDATE "content" SET "document" = @p0, "updated_at" = @p1, "version" = @p2
+      WHERE "id" = @p3
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT "o"."id", "o"."address", "o"."created_at", "o"."edu_office_code", "o"."latitude", "o"."longitude", "o"."name", "o"."org_type", "o"."parent_id", "o"."school_code", "o"."school_level", "o"."updated_at"
+      FROM "organization" AS "o"
+      WHERE "o"."id" = @p
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@contentId='?' (DbType = Int32)], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*)
+      FROM "schedule_item" AS "s"
+      WHERE "s"."content_id" = @contentId

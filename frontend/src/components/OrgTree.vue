@@ -2,13 +2,18 @@
 /**
  * 기관 트리.
  *
- * `utils/orgTree.js` 의 `branchNodes()` 로 가지치기한 노드를 받는다 — 잎(학교 등)은
- * 트리에 그리지 않고 오른쪽 목록이 맡는다. 그래서 자식 수는 `children.length` 가
- * 아니라 가지치기 전 값인 `childCount` 를 쓴다.
+ * `utils/orgTree.js` 의 `withChildCount()` 를 거친 노드를 받는다 — **모든
+ * 기관**이 트리에 나온다(잎 포함). `childCount` 는 소속기관 수 배지에 쓴다.
  */
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+/** 분류 배지 — 학교급(초/중/고)은 번역이 있고, 나머지는 값 그대로. */
+function levelLabel(value) {
+  const key = `enums.schoolLevel.${value}`
+  return te(key) ? t(key) : value
+}
 
 defineProps({
   nodes: { type: Array, required: true },
@@ -30,8 +35,9 @@ const emit = defineEmits(['select'])
       >
         <span class="node-icon">{{ node.childCount ? '📂' : '📄' }}</span>
         <span class="node-name">{{ node.name }}</span>
-        <span v-if="node.org_type === '학교' && node.school_level" class="badge badge-muted">
-          {{ t(`enums.schoolLevel.${node.school_level}`) }}
+        <!-- 학교급 배지 — 구분 이름이 아니라 값의 존재로 판단한다(이름은 바뀔 수 있다). -->
+        <span v-if="node.school_level" class="badge badge-muted">
+          {{ levelLabel(node.school_level) }}
         </span>
         <span v-if="node.childCount" class="count" :title="t('org.childCount')">
           {{ node.childCount }}
@@ -93,8 +99,8 @@ const emit = defineEmits(['select'])
   white-space: nowrap;
 }
 
-/* 트리에 안 그리는 하위 기관이 몇 개인지 알려 준다 — 이 숫자가 없으면
-   비어 있는 기관과 학교 200개를 가진 기관이 똑같아 보인다. */
+/* 소속기관 수. 이 숫자가 없으면 비어 있는 기관과 학교 200개를 가진
+   기관이 접힌 상태에서 똑같아 보인다. */
 .count {
   flex: none;
   min-width: 20px;

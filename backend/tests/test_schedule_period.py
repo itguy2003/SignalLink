@@ -393,3 +393,157 @@ def test_version_changes_at_period_boundary(client, super_headers, db, device, m
 
 def test_no_assignment_is_demo_version(db, device):
     assert schedule_service.current_version(db, db.get(Device, device["id"])) == 0
+
+
+# ------------------------------------------------------- 소속기관 공지 참조
+def _make_notice(client, headers, org_id, name="가정통신", **extra):  # noqa: ANN001
+    notice = client.post(
+        "/api/v1/org-notices", headers=headers, json={"org_id": org_id, "name": name, **extra}
+    ).json()
+    client.put(
+        f"/api/v1/org-notices/{notice['id']}",
+        headers=headers,
+        json={
+            "items": [
+                {"duration_sec": 5, "document": {"version": 1, "elements": [{"id": "s1"}]}},
+                {"duration_sec": 7, "document": {"version": 1, "elements": [{"id": "s2"}]}},
+            ]
+        },
+    )
+    return notice
+
+
+def test_notice_ref_expands_to_slides(client, super_headers, device, school_id, root_org_id):
+    """공지 참조 아이템은 표출 시 슬라이드 전체로 펼쳐진다 (상위기관 공지 포함)."""
+    notice = _make_notice(client, super_headers, root_org_id)
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={
+            "name": "공지만",
+            "kind": "목록반복",
+            "org_id": school_id,
+            "items": [{"day_of_week": -1, "org_notice_id": notice["id"]}],
+        },
+    ).json()
+    # 편집기 표시용 이름은 공지 이름이다.
+    assert schedule["items"][0]["org_notice_id"] == notice["id"]
+    assert schedule["items"][0]["content_name"] == "가정통신"
+
+    _assign(client, super_headers, device["id"], [schedule["id"]])
+    payload = client.get("/api/v1/player/schedule", headers=_device_token(client, device)).json()
+    assert payload["is_demo"] is False
+    assert [i["duration_sec"] for i in payload["items"]] == [5, 7]
+    assert [i["sort_order"] for i in payload["items"]] == [0, 1]
+    assert payload["items"][0]["content"]["elements"][0]["id"] == "s1"
+
+
+def test_notice_edit_bumps_schedule_version(client, super_headers, device, school_id):
+    notice = _make_notice(client, super_headers, school_id)
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={
+            "name": "공지만",
+            "kind": "목록반복",
+            "org_id": school_id,
+            "items": [{"day_of_week": -1, "org_notice_id": notice["id"]}],
+        },
+    ).json()
+    _assign(client, super_headers, device["id"], [schedule["id"]])
+    before = client.get("/api/v1/player/schedule", headers=_device_token(client, device)).json()
+
+    # 공지를 고치면 참조하는 스케줄의 버전이 올라 장치가 변경을 알아챈다.
+    client.put(
+        f"/api/v1/org-notices/{notice['id']}",
+        headers=super_headers,
+        json={"items": [{"duration_sec": 3, "document": {"version": 1, "elements": []}}]},
+    )
+    ack = client.post(
+        "/api/v1/player/heartbeat",
+        headers=_device_token(client, device),
+        json={"schedule_version": before["version"]},
+    ).json()
+    assert ack["schedule_changed"] is True
+    after = client.get("/api/v1/player/schedule", headers=_device_token(client, device)).json()
+    assert [i["duration_sec"] for i in after["items"]] == [3]
+
+
+def test_notice_out_of_period_is_skipped(client, super_headers, device, school_id):
+    notice = _make_notice(
+        client, super_headers, school_id, start_date="2020-01-01", end_date="2020-12-31"
+    )
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={
+            "name": "지난 공지",
+            "kind": "목록반복",
+            "org_id": school_id,
+            "items": [{"day_of_week": -1, "org_notice_id": notice["id"]}],
+        },
+    ).json()
+    _assign(client, super_headers, device["id"], [schedule["id"]])
+
+    payload = client.get("/api/v1/player/schedule", headers=_device_token(client, device)).json()
+    # 기간 밖 공지뿐이면 검은 화면 대신 데모다.
+    assert payload["is_demo"] is True
+
+
+def test_notice_time_window_is_minute_precise(client, super_headers, device, school_id):
+    """기간에 시각이 있으면 분 단위로 판정한다(서버 로컬 시각 기준)."""
+    from datetime import datetime, timedelta
+
+    now = datetime.now().astimezone()
+    fmt = "%Y-%m-%dT%H:%M"
+    open_notice = _make_notice(
+        client, super_headers, school_id, name="열린 공지",
+        start_date=(now - timedelta(hours=1)).strftime(fmt),
+        end_date=(now + timedelta(hours=1)).strftime(fmt),
+    )
+    closed_notice = _make_notice(
+        client, super_headers, school_id, name="닫힌 공지",
+        start_date=(now - timedelta(hours=3)).strftime(fmt),
+        end_date=(now - timedelta(hours=2)).strftime(fmt),
+    )
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={
+            "name": "시각 창",
+            "kind": "목록반복",
+            "org_id": school_id,
+            "items": [
+                {"day_of_week": -1, "org_notice_id": open_notice["id"]},
+                {"day_of_week": -1, "org_notice_id": closed_notice["id"]},
+            ],
+        },
+    ).json()
+    _assign(client, super_headers, device["id"], [schedule["id"]])
+
+    payload = client.get("/api/v1/player/schedule", headers=_device_token(client, device)).json()
+    # 열린 공지의 2장만 나간다 — 닫힌 공지는 분 단위로 걸러졌다.
+    assert payload["is_demo"] is False
+    assert len(payload["items"]) == 2
+
+
+def test_notice_from_other_branch_is_rejected(client, super_headers, school_id, root_org_id):
+    other = client.post(
+        "/api/v1/organizations",
+        headers=super_headers,
+        json={"name": "다른교육청", "parent_id": root_org_id, "org_type": "기관"},
+    ).json()["id"]
+    notice = _make_notice(client, super_headers, other)
+
+    response = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={
+            "name": "남의 공지",
+            "kind": "목록반복",
+            "org_id": school_id,
+            "items": [{"day_of_week": -1, "org_notice_id": notice["id"]}],
+        },
+    )
+    assert response.status_code == 403
+    assert "쓸 수 없는 공지" in response.json()["detail"]

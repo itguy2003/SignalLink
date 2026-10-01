@@ -5,7 +5,7 @@
  * 편집기를 고칠 필요가 없어야 한다. 그래서 확인할 것은 "명세의 type 에 맞는
  * 칸이 나오는가"와 "고친 값이 요소에 그대로 들어가는가" 둘이다.
  */
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
@@ -209,5 +209,64 @@ describe('전환 효과 옵션', () => {
     await wrapper.find('select').setValue('dissolve')
 
     expect(element.options.transition).toBe('dissolve')
+  })
+})
+
+describe('커뮤니티 재생목록 고르기', () => {
+  // 상위기관 커뮤니티의 재생목록을 집어 삽입하는 옵션. 목록은 서버에서 받고,
+  // 비우면 자동 선택(서버가 고름)이라는 선택지가 항상 맨 앞에 있다.
+  const PICKER = { key: 'playlist_id', label: '표시할 재생목록', type: 'community_playlist' }
+
+  async function mountPicker(elementOptions = {}) {
+    const { api } = await import('@/api/client')
+    api.get.mockResolvedValueOnce({
+      items: [
+        { id: 11, title: '개교기념 안내', publish_status: '게시' },
+        { id: 12, title: '가을 축제 홍보', publish_status: '대기중' },
+      ],
+      total: 2,
+      page: 1,
+      size: 100,
+    })
+    const built = mountForm([PICKER], elementOptions)
+    await flushPromises()
+    return built
+  }
+
+  it('자동 선택 + 커뮤니티 재생목록 목록을 내놓는다', async () => {
+    const { wrapper } = await mountPicker()
+
+    const labels = wrapper.findAll('[data-test="community-playlist"] option').map((o) => o.text())
+    expect(labels[0]).toContain('자동 선택')
+    expect(labels).toContain('개교기념 안내')
+    // 게시 전 것을 고르면 표출되지 않는다 — 상태를 이름 옆에 보여 준다.
+    expect(labels.some((l) => l.includes('가을 축제 홍보') && l.includes('[대기중]'))).toBe(true)
+  })
+
+  it('집은 재생목록은 숫자 id 로 들어간다', async () => {
+    const { wrapper, element } = await mountPicker()
+
+    await wrapper.find('[data-test="community-playlist"]').setValue('12')
+
+    expect(element.options.playlist_id).toBe(12)
+  })
+
+  it('비우면 자동 선택(null)으로 돌아간다', async () => {
+    const { wrapper, element } = await mountPicker({ playlist_id: 12 })
+
+    await wrapper.find('[data-test="community-playlist"]').setValue('')
+
+    expect(element.options.playlist_id).toBeNull()
+  })
+
+  it('목록을 못 받아도 자동 선택은 남는다', async () => {
+    const { api } = await import('@/api/client')
+    api.get.mockRejectedValueOnce(new Error('403'))
+    const { wrapper } = mountForm([PICKER])
+    await flushPromises()
+
+    const options = wrapper.findAll('[data-test="community-playlist"] option')
+    expect(options).toHaveLength(1)
+    expect(options[0].text()).toContain('자동 선택')
   })
 })

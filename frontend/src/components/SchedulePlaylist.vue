@@ -18,13 +18,24 @@ import {
   readPlaylistItemDrag,
   writePlaylistItemDrag,
 } from '@/utils/contentDnd'
+import {
+  DEFAULT_TRANSITION,
+  DEFAULT_TRANSITION_MS,
+  MAX_TRANSITION_MS,
+  MIN_TRANSITION_MS,
+  TRANSITION_GROUPS,
+  fitsIn,
+  groupKey,
+  labelKey,
+  normalizeMs,
+} from '@/utils/transitions'
 
 const props = defineProps({
   /** 서버 아이템 배열(부모가 소유). 이 컴포넌트가 직접 순서를 바꾼다. */
   items: { type: Array, required: true },
 })
 
-const emit = defineEmits(['change', 'pick', 'edit', 'dropContent'])
+const emit = defineEmits(['change', 'pick', 'pickNotice', 'edit', 'dropContent'])
 
 /** 드롭 위치 표시(항목 사이 어디에 끼울지). */
 const dropIndex = ref(null)
@@ -97,7 +108,14 @@ const formattedTotal = computed(() => {
     : t('playlist.durationSec', { seconds })
 })
 
-const emptyCount = computed(() => props.items.filter((item) => !item.content_id).length)
+/** 인라인 문서(재생목록 드롭 등)를 든 아이템은 빈 칸이 아니다. */
+function hasInline(item) {
+  return Boolean(item.content?.elements?.length)
+}
+
+const filled = (item) => Boolean(item.content_id || item.org_notice_id) || hasInline(item)
+
+const emptyCount = computed(() => props.items.filter((item) => !filled(item)).length)
 
 function move(index, offset) {
   const target = index + offset
@@ -118,6 +136,29 @@ function duplicate(index) {
   emit('change')
 }
 
+/** 앞 칸에서 이 칸으로 넘어올 때의 효과 — 재생목록 칸과 같은 규약. */
+function setTransition(item, value) {
+  item.transition = value
+  emit('change')
+}
+
+function setTransitionMs(item, value) {
+  item.transition_ms = normalizeMs(value)
+  emit('change')
+}
+
+/** 전환이 그 칸의 표출 시간 안에 끝나는가. 넘치면 저장에서 서버가 막는다. */
+function overflows(item) {
+  return !fitsIn(item.transition, item.transition_ms ?? DEFAULT_TRANSITION_MS, item.duration_sec)
+}
+
+/** 하나 정해 두고 전체에 퍼뜨린다. 칸이 많으면 하나씩 고르는 일이 고역이다. */
+function applyToAll(value) {
+  if (!value) return
+  for (const item of props.items) item.transition = value
+  emit('change')
+}
+
 function setDuration(item, value) {
   const seconds = Math.max(1, Number(value) || 1)
   item.duration_sec = seconds
@@ -125,7 +166,10 @@ function setDuration(item, value) {
 }
 
 function label(item, index) {
-  return item.content_name || t('playlist.itemFallback', { index: index + 1 })
+  if (item.content_name) return item.content_name
+  // 인라인 재생목록은 요소가 이름을 들고 있다(다시 열었을 때도 보이게).
+  const inlineName = item.content?.elements?.[0]?.options?.playlist_name
+  return inlineName || t('playlist.itemFallback', { index: index + 1 })
 }
 </script>
 
@@ -137,8 +181,28 @@ function label(item, index) {
         <span class="muted total">
           {{ t('playlist.total', { count: items.length, duration: formattedTotal }) }}
         </span>
+        <!-- 칸이 많으면 하나씩 고르는 것이 고역이다. -->
+        <select
+          v-if="items.length > 1"
+          class="select apply-all"
+          @change="applyToAll($event.target.value); $event.target.value = ''"
+        >
+          <option value="">{{ t('transition.applyAll') }}</option>
+          <optgroup
+            v-for="group in TRANSITION_GROUPS"
+            :key="group.key"
+            :label="t(groupKey(group.key))"
+          >
+            <option v-for="kind in group.kinds" :key="kind" :value="kind">
+              {{ t(labelKey(kind)) }}
+            </option>
+          </optgroup>
+        </select>
         <button class="btn btn-sm btn-primary" @click="emit('pick', null)">
           {{ t('playlist.add') }}
+        </button>
+        <button class="btn btn-sm" data-test="add-notice" @click="emit('pickNotice')">
+          {{ t('grid.addOrgNotice') }}
         </button>
       </div>
     </div>
@@ -170,23 +234,62 @@ function label(item, index) {
         <span class="order">{{ index + 1 }}</span>
 
         <div class="body">
-          <div class="name" :class="{ missing: !item.content_id }">
+          <div class="name" :class="{ missing: !filled(item) }">
+            <span v-if="item.org_notice_id">📢</span>
             {{ label(item, index) }}
           </div>
           <div class="meta muted">
-            <span v-if="item.content_id">#{{ item.content_id }}</span>
+            <span v-if="item.org_notice_id" class="badge badge-primary">
+              {{ t('playlist.noticeRef') }}
+            </span>
+            <span v-else-if="item.content_id">#{{ item.content_id }}</span>
             <span v-else>{{ t('playlist.noContent') }}</span>
             <span v-if="item.day_of_week >= 0" class="badge badge-warning">
               {{ t('playlist.hasDay') }}
             </span>
+            <!-- 효과가 끝나기 전에 넘어가면 화면이 영영 제자리에 놓이지 않는다. -->
+            <span v-if="overflows(item)" class="warn">{{ t('transition.tooLong') }}</span>
           </div>
         </div>
 
-        <label class="duration">
+        <label class="transition" :class="{ bad: overflows(item) }">
+          <span class="muted">{{ t('transition.label') }}</span>
+          <select
+            class="select"
+            :value="item.transition ?? DEFAULT_TRANSITION"
+            @change="setTransition(item, $event.target.value)"
+          >
+            <optgroup
+              v-for="group in TRANSITION_GROUPS"
+              :key="group.key"
+              :label="t(groupKey(group.key))"
+            >
+              <option v-for="kind in group.kinds" :key="kind" :value="kind">
+                {{ t(labelKey(kind)) }}
+              </option>
+            </optgroup>
+          </select>
+          <!-- 효과가 없으면 시간은 쓰이지 않는다. 고칠 수 있게 두면 헛일이다. -->
+          <input
+            class="input ms"
+            type="number"
+            :min="MIN_TRANSITION_MS"
+            :max="MAX_TRANSITION_MS"
+            step="100"
+            :title="t('transition.msTitle')"
+            :disabled="(item.transition ?? DEFAULT_TRANSITION) === 'none'"
+            :value="item.transition_ms ?? DEFAULT_TRANSITION_MS"
+            @change="setTransitionMs(item, $event.target.value)"
+          />
+          <span class="muted">{{ t('transition.ms') }}</span>
+        </label>
+
+        <label class="duration" :title="item.org_notice_id ? t('playlist.noticeDurationHint') : undefined">
           <input
             class="input"
             type="number"
             min="1"
+            :disabled="Boolean(item.org_notice_id)"
             :value="item.duration_sec"
             @change="setDuration(item, $event.target.value)"
           />
@@ -392,5 +495,38 @@ function label(item, index) {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+.transition {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.transition .select {
+  width: 116px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.transition .ms {
+  width: 62px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.transition.bad .ms {
+  border-color: var(--danger);
+}
+
+.warn {
+  color: var(--danger);
+}
+
+.apply-all {
+  width: 116px;
+  padding: 3px 6px;
+  font-size: 11px;
 }
 </style>

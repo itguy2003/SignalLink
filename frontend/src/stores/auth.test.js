@@ -1,9 +1,8 @@
 /**
- * 인증 스토어의 권한 판정 — 커뮤니티 유저 중심.
+ * 인증 스토어의 권한 판정.
  *
- * 커뮤니티 역할은 '이것**만** 할 수 있다' 는 제한이지 '이것을 할 수 있다' 는
- * 허가가 아니다. 그래서 다른 역할과 함께 붙었을 때 어느 쪽이 이기는지가
- * 핵심이다 — 담당자에게 얹었다고 그 사람이 갑자기 장치를 못 보게 되면 곤란하다.
+ * 2026-10 개편: COMMUNITY_USER 역할이 사라졌다 — 커뮤니티는 모든 승인
+ * 사용자의 공간이고, 게시 승인·설정만 관리자의 일로 남는다.
  *
  * 화면 판정은 서버 판정의 사본이다(``services/permissions``). 여기서 통과해도
  * 서버가 다시 막는다.
@@ -17,7 +16,7 @@ vi.mock('@/api/client', () => ({
   setToken: vi.fn(),
 }))
 
-import { ASSIGNABLE_ROLES, COMMUNITY_ROUTES, ROLES, useAuthStore } from './auth'
+import { ASSIGNABLE_ROLES, ROLES, useAuthStore } from './auth'
 
 /** 그 역할들을 가진 사람으로 로그인한 셈 친다. */
 function asUser(...roles) {
@@ -31,69 +30,35 @@ beforeEach(() => {
 })
 
 describe('역할 목록', () => {
-  it('커뮤니티 유저가 역할에 들어 있다', () => {
-    expect(ROLES).toContain('COMMUNITY_USER')
-  })
-
-  it('관리자가 부여할 수 있다', () => {
-    // 부여할 수 없으면 만들 방법이 없는 역할이 된다.
-    expect(ASSIGNABLE_ROLES).toContain('COMMUNITY_USER')
-  })
-
-  it('열어 두는 화면은 커뮤니티 서브 메뉴뿐이다', () => {
-    // 이미지·동영상 화면은 게시판으로 합쳐졌고, 콘텐츠·재생목록은
-    // 관리자의 운영 화면이다 — 커뮤니티 유저에게는 게시판 하나다.
-    expect(COMMUNITY_ROUTES).toEqual(['community-board'])
-  })
-})
-
-describe('커뮤니티 유저 판정', () => {
-  it('커뮤니티 역할만 있으면 커뮤니티 유저다', () => {
-    expect(asUser('COMMUNITY_USER').isCommunityUser).toBe(true)
-  })
-
-  it('아무 역할이 없으면 아니다', () => {
-    expect(asUser().isCommunityUser).toBe(false)
-  })
-
-  it('관리 역할을 함께 가지면 그쪽이 이긴다', () => {
-    // 담당자에게 커뮤니티 역할을 얹었다고 장치를 못 보게 되면 곤란하다.
-    for (const role of ['SUPER_ADMIN', 'ORG_ADMIN', 'DEVICE_MANAGER', 'HOMEROOM_TEACHER']) {
-      expect(asUser('COMMUNITY_USER', role).isCommunityUser, role).toBe(false)
-      setActivePinia(createPinia())
-    }
+  it('커뮤니티 유저 역할은 더 이상 없다', () => {
+    // 2026-10 개편: 커뮤니티는 역할이 아니라 모두의 공간이다.
+    expect(ROLES).not.toContain('COMMUNITY_USER')
+    expect(ASSIGNABLE_ROLES).not.toContain('COMMUNITY_USER')
   })
 })
 
 describe('할 수 있는 일', () => {
-  it('커뮤니티 유저는 커뮤니티에 올릴 수 있다', () => {
-    // 커뮤니티가 그 사람에게 열려 있는 유일한 공간이다.
-    expect(asUser('COMMUNITY_USER').can.shareInCommunity).toBe(true)
+  it('일반 회원도 커뮤니티에 들어가고 올릴 수 있다', () => {
+    const can = asUser().can
+    expect(can.useCommunity).toBe(true)
+    expect(can.shareInCommunity).toBe(true)
   })
 
-  it('커뮤니티 유저는 수집원을 손대지 못한다', () => {
-    // 글을 쓰는 것과 어디서 긁어 올지 정하는 것은 다른 일이다.
-    expect(asUser('COMMUNITY_USER').can.manageBoards).toBe(false)
-  })
-
-  it('커뮤니티 유저는 관리 화면의 어떤 것도 못 한다', () => {
-    const can = asUser('COMMUNITY_USER').can
-
+  it('일반 회원은 수집원·관리 화면을 손대지 못한다', () => {
+    const can = asUser().can
+    expect(can.manageBoards).toBe(false)
     expect(can.manageOrgs).toBe(false)
     expect(can.manageUsers).toBe(false)
     expect(can.manageDevices).toBe(false)
     expect(can.manageSchedules).toBe(false)
+    // 커뮤니티 게시 승인(운영)도 관리자의 일이다.
+    expect(can.manageCommunity).toBe(false)
   })
 
-  it('관리자는 커뮤니티에도 올리고 수집원도 다룬다', () => {
+  it('관리자는 커뮤니티 운영(게시 승인·설정)까지 다룬다', () => {
     const can = asUser('ORG_ADMIN').can
-
     expect(can.shareInCommunity).toBe(true)
+    expect(can.manageCommunity).toBe(true)
     expect(can.manageBoards).toBe(true)
-  })
-
-  it('일반 회원은 보기만 한다', () => {
-    // 올리라고 만든 역할이 커뮤니티 유저다.
-    expect(asUser().can.shareInCommunity).toBe(false)
   })
 })

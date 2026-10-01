@@ -37,7 +37,7 @@ const emit = defineEmits([
   'edit',
   'delegate',
   'remove',
-  'assign',
+  'edit-schedules',
   'command',
   'refresh',
 ])
@@ -88,7 +88,7 @@ function forward(event, payload) {
         @edit="forward('edit', $event)"
         @delegate="forward('delegate', $event)"
         @remove="forward('remove', $event)"
-        @assign="forward('assign', $event)"
+        @edit-schedules="forward('edit-schedules', $event)"
         @command="forward('command', $event)"
         @refresh="forward('refresh', $event)"
       />
@@ -123,7 +123,7 @@ function forward(event, payload) {
           @edit="forward('edit', $event)"
           @delegate="forward('delegate', $event)"
           @remove="forward('remove', $event)"
-          @assign="forward('assign', $event)"
+          @edit-schedules="forward('edit-schedules', $event)"
           @command="forward('command', $event)"
           @refresh="forward('refresh', $event)"
         />

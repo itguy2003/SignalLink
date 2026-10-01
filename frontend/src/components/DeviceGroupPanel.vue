@@ -46,7 +46,7 @@ const emit = defineEmits([
   'edit',
   'delegate',
   'remove',
-  'assign',
+  'edit-schedules',
   'command',
   'refresh',
 ])
@@ -235,7 +235,7 @@ defineExpose({ openCreate })
       @edit="emit('edit', $event)"
       @delegate="emit('delegate', $event)"
       @remove="emit('remove', $event)"
-      @assign="emit('assign', $event)"
+      @edit-schedules="emit('edit-schedules', $event)"
       @command="emit('command', $event)"
       @refresh="emit('refresh', $event)"
     />

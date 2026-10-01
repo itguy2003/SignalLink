@@ -9,8 +9,7 @@
     ORG_ADMIN          자기 기관 + 모든 하위 기관의 기관/사용자/장치
     DEVICE_MANAGER     자신에게 위임된 장치만
     HOMEROOM_TEACHER   자기 기관 장치 조회 + 위임받은 장치 관리
-    MEMBER             기본 역할. 본인 정보만.
-    COMMUNITY_USER     커뮤니티(공유 게시판·이미지·동영상)만. 관리 화면에는 들어오지 못한다.
+    MEMBER             기본 역할. 본인 정보만. 커뮤니티는 모든 승인 사용자가 쓴다.
 """
 
 from __future__ import annotations
@@ -19,10 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.device import Device, DeviceManager
-from app.models.enums import OrgType, Role
+from app.models.enums import Role
 from app.models.organization import Organization
 from app.models.user import User
-from app.services import org_tree
+from app.services import org_tree, org_types
 
 
 def is_super_admin(user: User) -> bool:
@@ -31,19 +30,6 @@ def is_super_admin(user: User) -> bool:
 
 def is_org_admin(user: User) -> bool:
     return user.has_role(Role.ORG_ADMIN)
-
-
-def is_community_user(user: User) -> bool:
-    """게시판만 쓰는 사람인가.
-
-    다른 역할을 함께 가졌다면 그쪽이 이긴다 — 커뮤니티 역할은 '이것만 할 수
-    있다' 는 제한이지 '이것을 할 수 있다' 는 허가가 아니다. 기관 담당자에게
-    커뮤니티 역할을 얹었다고 해서 그 사람이 갑자기 장치를 못 보게 되면 곤란하다.
-    """
-    return user.has_role(Role.COMMUNITY_USER) and not any(
-        user.has_role(role)
-        for role in (Role.SUPER_ADMIN, Role.ORG_ADMIN, Role.DEVICE_MANAGER, Role.HOMEROOM_TEACHER)
-    )
 
 
 def community_org_of(db: Session, org_id: int) -> int | None:
@@ -57,7 +43,8 @@ def community_org_of(db: Session, org_id: int) -> int | None:
     seen: set[int] = set()
     while org is not None and org.id not in seen:
         seen.add(org.id)
-        if org.org_type == OrgType.ORG:
+        # 기관구분은 이름이 아니라 category 로 판정한다 — 이름은 관리자가 바꾼다.
+        if org_types.category_of(db, org.org_type) == "기관":
             return org.id
         org = db.get(Organization, org.parent_id) if org.parent_id is not None else None
     return None
@@ -69,15 +56,12 @@ def community_org_id(db: Session, user: User) -> int | None:
 
 
 def can_use_community(user: User) -> bool:
-    """커뮤니티 공간(게시판·이미지·동영상)에 들어올 수 있는가.
+    """커뮤니티 공간에 들어올 수 있는가 — 모든 승인 사용자(2026-10 개편).
 
-    기관관리자와 커뮤니티 유저의 공간이다(슈퍼관리자는 어디든 들어온다).
-    일반 회원·장치담당·담임은 들어오지 못한다 — 메뉴도 서지 않지만,
-    주소를 쳐도 여기서 막는다.
+    COMMUNITY_USER 역할이 사라지면서 커뮤니티는 구성원 모두의 공간이 됐다.
+    게시 승인·설정만 관리자의 일로 남는다(라우터의 _can_publish).
     """
-    return (
-        user.has_role(Role.COMMUNITY_USER) or is_super_admin(user) or is_org_admin(user)
-    )
+    return True
 
 
 def can_manage_community(user: User) -> bool:
@@ -202,3 +186,47 @@ def can_create_device(db: Session, user: User, org_id: int) -> bool:
 
 def can_delete_device(db: Session, user: User, device: Device) -> bool:
     return can_create_device(db, user, device.org_id)
+
+
+# ------------------------------------------------------------------ 콘텐츠 공유
+
+#: 콘텐츠 공유 구분. 관리 범위 **밖의** 사용자에게 콘텐츠를 열어 주는 유일한
+#: 통로다. 없음=공유하지 않음(기본) / 동일기관=같은 기관 / 소속기관=같은
+#: 상위기관 아래 기관들(형제 기관) / 전체=모든 사용자.
+CONTENT_SHARE_SCOPES = ("없음", "동일기관", "소속기관", "전체")
+
+CONTENT_SHARE_SCOPE_ERROR = "공유 구분은 없음/동일기관/소속기관/전체 중 하나여야 합니다."
+
+
+def sibling_org_ids(db: Session, org_id: int) -> set[int]:
+    """같은 상위기관 아래 기관들(자기 포함). 최상위(부모 없음)면 자기뿐이다."""
+    org = db.get(Organization, org_id)
+    if org is None or org.parent_id is None:
+        return {org_id}
+    rows = db.execute(select(Organization.id).where(Organization.parent_id == org.parent_id))
+    return {row[0] for row in rows} | {org_id}
+
+
+def content_shared_with(db: Session, content, org_id: int) -> bool:  # noqa: ANN001
+    """콘텐츠의 공유 구분이 ``org_id`` 기관에 열려 있는가(소유 범위와 무관).
+
+    판정 기준 기관은 언제나 **소비하는 쪽**이다 — 목록/브라우저에서는 보는
+    기관, 스케줄 검증에서는 스케줄의 기관. 수정·삭제 권한은 공유와 무관하게
+    기존 규칙(관리 범위 또는 작성자) 그대로다.
+    """
+    if content.share_scope == "전체":
+        return True
+    if content.share_scope == "동일기관":
+        return content.org_id == org_id
+    if content.share_scope != "소속기관":
+        return False
+    if content.org_id == org_id:
+        return True
+    owner = db.get(Organization, content.org_id)
+    viewer = db.get(Organization, org_id)
+    return (
+        owner is not None
+        and viewer is not None
+        and owner.parent_id is not None
+        and owner.parent_id == viewer.parent_id
+    )

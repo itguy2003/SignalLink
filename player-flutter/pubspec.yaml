@@ -1,0 +1,29 @@
+name: signallink_player
+description: SignalLink Green 플레이어 (Android/iOS) — 웹 플레이어를 품는 키오스크 셸
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 웹 플레이어를 품는 WebView. 문서 시작 시점 스크립트(부트스트랩 주입)와
+  # 화면 캡처, 소리 있는 자동재생 허용이 모두 필요해서 이 플러그인을 쓴다.
+  flutter_inappwebview: ^6.1.5
+  # 설정(서버 주소·장치 고유번호·마스터 키) 저장 — WPF 셸의 settings.json 역할.
+  shared_preferences: ^2.3.2
+  # 화면 캡처를 서버에 올릴 때(multipart).
+  http: ^1.2.2
+  http_parser: ^4.0.2
+  # 사이니지는 화면이 꺼지면 존재 이유가 없다 — WPF 셸의 SetThreadExecutionState 역할.
+  wakelock_plus: ^1.2.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

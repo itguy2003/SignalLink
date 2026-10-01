@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '@/api/client'
 import ModalDialog from '@/components/ModalDialog.vue'
 import { useToastStore } from '@/stores/toast'
+import { shareLabelKey } from '@/utils/contentShare'
 import { defaultSize, labelKey, toQuery } from '@/utils/orientation'
 
 const props = defineProps({
@@ -37,6 +38,8 @@ const page = ref({ items: [], total: 0, page: 1, size: 24 })
 const loading = ref(false)
 const query = ref('')
 const orientationFilter = ref(toQuery(props.orientation))
+/** 공유 필터: '' = 전체(공유 포함) | 'mine' = 내 것만 | 'shared' = 공유받은 것만. */
+const shareFilter = ref('')
 const creating = ref(false)
 const newName = ref('')
 
@@ -48,6 +51,9 @@ async function load(pageNumber = 1) {
     page.value = await api.get('/contents', {
       q: query.value || undefined,
       orientation: orientationFilter.value || undefined,
+      // 공유 판정의 기준은 스케줄의 기관(org_id) — 서버가 공유 구분에 따라
+      // 관리 범위 밖의 콘텐츠도 함께 내려준다(shared 표식 포함).
+      share: shareFilter.value || undefined,
       org_id: props.orgId ?? undefined,
       page: pageNumber,
       size: page.value.size,
@@ -61,6 +67,7 @@ async function load(pageNumber = 1) {
 
 onMounted(() => load(1))
 watch(orientationFilter, () => load(1))
+watch(shareFilter, () => load(1))
 
 async function createContent() {
   const name = newName.value.trim()
@@ -116,6 +123,12 @@ function formatSize(content) {
         <option value="landscape">{{ t('content.landscape') }}</option>
         <option value="portrait">{{ t('content.portrait') }}</option>
       </select>
+      <!-- 공유 필터 — 공유 구분에 따라 관리 범위 밖의 콘텐츠도 보인다. -->
+      <select v-model="shareFilter" class="select narrow" data-test="share-filter">
+        <option value="">{{ t('content.shareFilterAll') }}</option>
+        <option value="mine">{{ t('content.shareFilterMine') }}</option>
+        <option value="shared">{{ t('content.shareFilterShared') }}</option>
+      </select>
       <button class="btn" @click="load(1)">{{ t('common.search') }}</button>
       <div class="spacer" />
       <div class="row">
@@ -159,8 +172,21 @@ function formatSize(content) {
               · {{ t('content.usedIn', { count: content.usage_count }) }}
             </span>
           </div>
+          <!-- 공유받은 콘텐츠 — 어느 기관이 어떤 구분으로 열었는지 보여 준다. -->
+          <div v-if="content.shared" class="sub">
+            <span class="badge badge-primary" data-test="shared-badge">
+              {{ t('content.sharedFrom', { org: content.org_name ?? '?' }) }}
+              · {{ t(shareLabelKey(content.share_scope)) }}
+            </span>
+          </div>
         </div>
-        <span class="edit-link" role="button" @click.stop="emit('edit', content)">
+        <!-- 공유받은 콘텐츠는 남의 것 — 여기서 수정으로 들어가지 않는다. -->
+        <span
+          v-if="!content.shared"
+          class="edit-link"
+          role="button"
+          @click.stop="emit('edit', content)"
+        >
           {{ t('common.edit') }}
         </span>
       </button>

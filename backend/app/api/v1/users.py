@@ -19,6 +19,7 @@ from app.api.deps import (
     forbid,
     not_found,
 )
+from app.core.passwords import complexity_error
 from app.core.security import hash_password
 from app.models.enums import Role, UserStatus
 from app.models.organization import Organization
@@ -119,6 +120,8 @@ def create_user(payload: UserCreate, actor: CurrentUser, db: DbSession) -> UserO
         raise bad_request("존재하지 않는 기관입니다.")
     if db.execute(select(User.id).where(User.user_id == payload.user_id)).scalar_one_or_none():
         raise bad_request("이미 사용 중인 사용자ID 입니다.")
+    if (reason := complexity_error(payload.password)) is not None:
+        raise bad_request(reason)
 
     user = User(
         user_id=payload.user_id,
@@ -176,6 +179,8 @@ def update_user(
         _replace_roles(db, target, [str(r) for r in data["roles"]])
 
     if "password" in data and data["password"]:
+        if (reason := complexity_error(data["password"])) is not None:
+            raise bad_request(reason)
         target.password_hash = hash_password(data["password"])
 
     for field in ("name", "phone", "email"):

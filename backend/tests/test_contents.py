@@ -369,3 +369,172 @@ def test_duplicated_schedule_shares_content_reference(client, super_headers, sch
     # 콘텐츠는 라이브러리에서 공유된다 — 문서를 복제하지 않고 참조만 넘긴다.
     assert copy["items"][0]["content_id"] == content["id"]
     assert client.get(f"/api/v1/contents/{content['id']}", headers=super_headers).json()["usage_count"] == 2
+
+
+# ------------------------------------------------------------------ 콘텐츠 공유
+
+# 공유 구분은 관리 범위 **밖의** 사용자에게 콘텐츠를 열어 주는 유일한 통로다.
+# 없음(기본)=관리 범위 그대로 / 동일기관=같은 기관 / 소속기관=같은 상위기관
+# 아래 기관들(형제) / 전체=모두. 열리는 것은 조회·사용뿐이고 수정·삭제는
+# 여전히 소유 쪽 규칙을 따른다.
+
+
+def _set_share(client, headers, content_id, scope):  # noqa: ANN001
+    return client.put(
+        f"/api/v1/contents/{content_id}", headers=headers, json={"share_scope": scope}
+    )
+
+
+@pytest.fixture
+def far_school_id(client, super_headers, root_org_id) -> int:
+    """다른 상위기관(교육청) 아래 학교 — '소속기관' 공유가 닿지 않는 곳."""
+    office = client.post(
+        "/api/v1/organizations",
+        headers=super_headers,
+        json={"name": "다른교육청", "parent_id": root_org_id, "org_type": "기관"},
+    ).json()["id"]
+    return client.post(
+        "/api/v1/organizations",
+        headers=super_headers,
+        json={"name": "먼학교", "parent_id": office, "org_type": "학교"},
+    ).json()["id"]
+
+
+def test_share_scope_defaults_to_private(content):
+    assert content["share_scope"] == "없음"
+    assert content["shared"] is False
+
+
+def test_share_scope_must_be_a_known_value(client, super_headers, content):
+    assert _set_share(client, super_headers, content["id"], "우주").status_code == 400
+    response = client.post(
+        "/api/v1/contents",
+        headers=super_headers,
+        json={"name": "잘못된 공유", "share_scope": "우주"},
+    )
+    assert response.status_code == 400
+
+
+def test_sibling_share_reaches_the_neighbor_school(
+    client, super_headers, other_school_id, content, make_user, login
+):
+    # 같은 상위기관(최상위) 아래 형제 학교에는 '소속기관' 공유가 닿는다.
+    _set_share(client, super_headers, content["id"], "소속기관")
+
+    make_user("neighbor", other_school_id, [])
+    page = client.get("/api/v1/contents", headers=login("neighbor")).json()
+    assert [c["id"] for c in page["items"]] == [content["id"]]
+    assert page["items"][0]["shared"] is True
+
+    # 상세(문서 포함)도 읽을 수 있다 — 스케줄에 넣으려면 문서가 필요하다.
+    detail = client.get(f"/api/v1/contents/{content['id']}", headers=login("neighbor"))
+    assert detail.status_code == 200
+    assert detail.json()["shared"] is True
+
+
+def test_sibling_share_stops_at_a_different_parent(
+    client, super_headers, far_school_id, content, make_user, login
+):
+    _set_share(client, super_headers, content["id"], "소속기관")
+
+    make_user("faraway", far_school_id, [])
+    page = client.get("/api/v1/contents", headers=login("faraway")).json()
+    assert page["total"] == 0
+    assert (
+        client.get(f"/api/v1/contents/{content['id']}", headers=login("faraway")).status_code
+        == 403
+    )
+
+
+def test_global_share_reaches_everyone(
+    client, super_headers, far_school_id, content, make_user, login
+):
+    _set_share(client, super_headers, content["id"], "전체")
+
+    make_user("anyone", far_school_id, [])
+    page = client.get("/api/v1/contents", headers=login("anyone")).json()
+    assert [c["id"] for c in page["items"]] == [content["id"]]
+
+
+def test_share_filter_splits_mine_and_shared(
+    client, super_headers, other_school_id, content, make_user, login
+):
+    # 브라우저의 필터: share=mine 은 관리 범위의 것만, share=shared 는 공유로
+    # 열려 온 것만.
+    _set_share(client, super_headers, content["id"], "소속기관")
+    mine = client.post(
+        "/api/v1/contents",
+        headers=super_headers,
+        json={"name": "내 콘텐츠", "org_id": other_school_id},
+    ).json()
+
+    make_user("neighbor2", other_school_id, ["ORG_ADMIN"])
+    headers = login("neighbor2")
+
+    both = client.get("/api/v1/contents", headers=headers).json()
+    assert {c["id"] for c in both["items"]} == {content["id"], mine["id"]}
+
+    only_mine = client.get("/api/v1/contents?share=mine", headers=headers).json()
+    assert [c["id"] for c in only_mine["items"]] == [mine["id"]]
+
+    only_shared = client.get("/api/v1/contents?share=shared", headers=headers).json()
+    assert [c["id"] for c in only_shared["items"]] == [content["id"]]
+
+
+def test_shared_content_can_be_scheduled(
+    client, super_headers, other_school_id, content, make_user, login
+):
+    # 공유 판정의 기준은 스케줄의 기관이다 — 형제 학교의 스케줄에 붙는다.
+    _set_share(client, super_headers, content["id"], "소속기관")
+    schedule = client.post(
+        "/api/v1/schedules",
+        headers=super_headers,
+        json={"name": "이웃 스케줄", "kind": "시간지정", "org_id": other_school_id, "items": []},
+    ).json()
+
+    make_user("scheduler", other_school_id, ["ORG_ADMIN"])
+    response = client.put(
+        f"/api/v1/schedules/{schedule['id']}",
+        headers=login("scheduler"),
+        json={
+            "items": [
+                {
+                    "day_of_week": 0,
+                    "start_time": "09:00:00",
+                    "end_time": "10:00:00",
+                    "content_id": content["id"],
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_shared_content_is_still_read_only_for_others(
+    client, super_headers, other_school_id, content, make_user, login
+):
+    # 공유가 열어 주는 것은 조회·사용뿐이다.
+    _set_share(client, super_headers, content["id"], "전체")
+
+    make_user("reader", other_school_id, ["ORG_ADMIN"])
+    response = client.put(
+        f"/api/v1/contents/{content['id']}",
+        headers=login("reader"),
+        json={"name": "가로채기"},
+    )
+    assert response.status_code == 403
+
+
+def test_duplicate_starts_unshared(client, super_headers, school_id):
+    # 공유는 명시적인 행동이어야 한다 — 복사본이 몰래 공유되면 안 된다.
+    source = client.post(
+        "/api/v1/contents",
+        headers=super_headers,
+        json={"name": "널리 공유", "org_id": school_id, "share_scope": "전체"},
+    ).json()
+    assert source["share_scope"] == "전체"
+
+    copy = client.post(
+        f"/api/v1/contents/{source['id']}/duplicate", headers=super_headers
+    ).json()
+    assert copy["share_scope"] == "없음"

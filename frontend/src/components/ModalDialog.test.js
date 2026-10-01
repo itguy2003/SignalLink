@@ -43,12 +43,6 @@ describe('닫기', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('뒷배경을 누르면 닫는다', () => {
-    const wrapper = mountDialog()
-    pressThenClick(wrapper, '.backdrop', '.backdrop')
-    expect(wrapper.emitted('close')).toHaveLength(1)
-  })
-
   it('창 안을 눌러도 닫히지 않는다', () => {
     const wrapper = mountDialog()
     pressThenClick(wrapper, '.dialog-body', '.dialog-body')
@@ -57,10 +51,17 @@ describe('닫기', () => {
 })
 
 describe('멋대로 닫히지 않는다', () => {
+  // 생성·수정 폼이 이 창으로 뜬다. 닫기는 언제나 명시적인 행동(✕/취소)으로만
+  // 한다 — 무심코 바깥을 누른 순간 적던 내용이 사라지는 사고가 반복됐다.
+  it('뒷배경을 눌러도 닫히지 않는다', () => {
+    const wrapper = mountDialog()
+    pressThenClick(wrapper, '.backdrop', '.backdrop')
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
   it('입력창에서 끌어 선택하다 창 밖에서 손을 떼도 닫히지 않는다', () => {
-    // click 은 mousedown 과 mouseup 의 공통 조상에서 발생한다. 입력창에서 시작해
-    // 뒷배경에서 끝나면 그 조상이 뒷배경이라, 예전에는 여기서 창이 닫히며
-    // 편집하던 내용이 사라졌다.
+    // click 은 mousedown 과 mouseup 의 공통 조상(뒷배경)에서 발생한다 — 그래도
+    // 닫히면 안 된다.
     const wrapper = mountDialog()
     pressThenClick(wrapper, '.name', '.backdrop')
     expect(wrapper.emitted('close')).toBeUndefined()
@@ -72,24 +73,7 @@ describe('멋대로 닫히지 않는다', () => {
     expect(wrapper.emitted('close')).toBeUndefined()
   })
 
-  it('창 머리글에서 끌어도 닫히지 않는다', () => {
-    const wrapper = mountDialog()
-    pressThenClick(wrapper, '.dialog-head', '.backdrop')
-    expect(wrapper.emitted('close')).toBeUndefined()
-  })
-
-  it('한 번 막힌 뒤에도 정상적인 뒷배경 누르기는 동작한다', () => {
-    // 실수로 끈 상태가 남아 다음 클릭까지 먹히면 닫을 방법이 사라진다.
-    const wrapper = mountDialog()
-    pressThenClick(wrapper, '.name', '.backdrop')
-    expect(wrapper.emitted('close')).toBeUndefined()
-
-    pressThenClick(wrapper, '.backdrop', '.backdrop')
-    expect(wrapper.emitted('close')).toHaveLength(1)
-  })
-
-  it('뒷배경에서 눌러 창 안에서 떼면 닫히지 않는다', () => {
-    // 이때 click 은 뒷배경이 아니라 창에서 발생한다.
+  it('뒷배경에서 눌러 창 안에서 떼도 닫히지 않는다', () => {
     const wrapper = mountDialog()
     pressThenClick(wrapper, '.backdrop', '.dialog-body')
     expect(wrapper.emitted('close')).toBeUndefined()

@@ -1,0 +1,1 @@
+const r=["B","KB","MB","GB","TB","PB"];function u(t){if(typeof t!="number"||!Number.isFinite(t)||t<0)return null;if(t<1e3)return`${t}B`;let n=t,e=0;for(;n>=1e3&&e<r.length-1;)n/=1e3,e+=1;const i=n>=100?0:1;return`${Number(n.toFixed(i))}${r[e]}`}function f(t){return typeof t!="number"||!Number.isFinite(t)?null:Math.round(t*100)}export{u as a,f};

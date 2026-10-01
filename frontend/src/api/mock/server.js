@@ -29,6 +29,7 @@ const DEVICE_COMMANDS = {
 
 const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일']
 
+
 // 실제 네트워크처럼 약간의 지연을 준다(로딩 표시가 실제로 보이도록).
 // 단위 테스트에서는 불필요하게 느려지므로 0 으로 둔다.
 const LATENCY_MS = import.meta.env?.MODE === 'test' ? 0 : 120
@@ -40,6 +41,49 @@ function delay() {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value))
+}
+
+/** Pixabay 이미지 한 건 — 서버(services/pixabay.py._to_image)와 같은 추림. */
+function pixabayImage(hit) {
+  return {
+    kind: 'image',
+    id: hit.id,
+    preview: hit.previewURL,
+    // webformatURL 은 최대 640px 이라 DID 화면에는 작다. large 를 우선한다.
+    url: hit.largeImageURL || hit.webformatURL,
+    width: hit.imageWidth,
+    height: hit.imageHeight,
+    tags: hit.tags,
+    author: hit.user,
+    page: hit.pageURL,
+  }
+}
+
+/** Pixabay 동영상 한 건 — 서버(_to_video)와 같은 화질 우선순위. */
+function pixabayVideo(hit) {
+  const videos = hit.videos ?? {}
+  let best = null
+  for (const quality of ['large', 'medium', 'small', 'tiny']) {
+    if (videos[quality]?.url) {
+      best = videos[quality]
+      break
+    }
+  }
+  const preview = hit.picture_id
+    ? `https://i.vimeocdn.com/video/${hit.picture_id}_295x166.jpg`
+    : null
+  return {
+    kind: 'video',
+    id: hit.id,
+    preview,
+    url: best?.url ?? null,
+    width: best?.width,
+    height: best?.height,
+    duration: hit.duration,
+    tags: hit.tags,
+    author: hit.user,
+    page: hit.pageURL,
+  }
 }
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -58,12 +102,25 @@ function generateDeviceCode(existing) {
 
 class MockServer {
   constructor() {
+    // 테스트 모드에서 실제 Pixabay 를 쓰려면 빌드/개발 시
+    // VITE_PIXABAY_KEY 를 지정한다. 키가 번들에 실리므로 **개인 시연용**이다
+    // — 운영은 서버 프록시(/api/v1/stock)가 키를 숨긴다.
+    this.pixabayKey = import.meta.env?.VITE_PIXABAY_KEY ?? ''
     this.reset()
   }
 
   reset() {
     const seed = createSeed()
     this.organizations = seed.organizations
+    // 기관구분 마스터 — 이름은 바꿀 수 있고, 동작은 category 가 정한다.
+    // 기본 3종 외 항목(유치원)을 하나 둔다: 커뮤니티 공지대상 선택지가
+    // 하드코딩이 아니라 이 마스터를 그대로 읽는다는 것이 화면에서 보인다.
+    this.orgTypes = [
+      { id: 1, name: '기관', category: '기관', classifications: '' },
+      { id: 2, name: '학교', category: '학교', classifications: '초,중,고' },
+      { id: 3, name: '기타', category: '기타', classifications: '' },
+      { id: 4, name: '유치원', category: '학교', classifications: '' },
+    ]
     this.users = seed.users
     this.contents = seed.contents
     this.schedules = seed.schedules
@@ -73,15 +130,38 @@ class MockServer {
     this.playlists = seed.playlists
     this.assets = seed.assets ?? []
     this.boards = seed.boards
-    /** 커뮤니티(상위기관 공유 공간). 테스트 모드에서도 흐름을 다 밟을 수 있다. */
-    this.communityPosts = []
-    this.communityMedia = []
-    this.communityMediaPosts = []
-    this.communityContents = []
-    this.communityPlaylists = []
+    // 소속기관 공지 — 기간 있는 재생목록. 슬라이드는 문서를 인라인으로 갖는다.
+    this.orgNotices = []
+    /** 커뮤니티(상위기관 공유 공간) — 게시물 하나가 커뮤니티다(2026-10 개편).
+     * 메타데이터: 제목·공지대상(기관구분)·공지희망기간·연락처·메모.
+     * 시드 1건은 '게시' + 학교 대상 + 기간 안 — 학교 소속 계정으로 로그인하면
+     * 팝업이 뜨는 것을 테스트 모드에서 바로 볼 수 있다. */
+    this.communityPlaylists = [
+      {
+        id: 1,
+        org_id: 2,
+        author_id: 2,
+        author_name: '박교육',
+        contact: '02-1234-5678',
+        title: '가을 축제 자원봉사 모집',
+        memo: '10월 둘째 주 토요일, 교육청 앞마당에서 함께해요.',
+        target_org_types: ['학교'],
+        notice_start: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+        notice_end: new Date(Date.now() + 13 * 86_400_000).toISOString().slice(0, 10),
+        publish_status: '게시',
+        items: [],
+        assets: [],
+        version: 1,
+        created_at: new Date().toISOString(),
+      },
+    ]
+    /** 커뮤니티별 게시 정책. 켜면 등록 즉시 '게시'. */
+    this.communitySettings = new Map()
     this.posts = seed.posts
     this.sessions = new Map()
     this.nextId = {
+      orgNotice: 700,
+      orgType: 100,
       org: 100,
       user: 100,
       device: 100,
@@ -94,10 +174,6 @@ class MockServer {
       playlist: 100,
       playlistItem: 100,
       asset: 100,
-      communityPost: 100,
-      communityMedia: 100,
-      communityMediaPost: 100,
-      communityContent: 100,
       communityPlaylist: 100,
     }
   }
@@ -131,6 +207,19 @@ class MockServer {
     if (this.isSuper(user)) return null
     if (this.isOrgAdmin(user)) return this.descendantIds(user.org_id)
     return new Set([user.org_id])
+  }
+
+  /** 자기 자신을 포함한 조상 사슬(가까운 순). */
+  ancestorIds(orgId) {
+    const chain = [orgId]
+    const seen = new Set(chain)
+    let current = this.organizations.find((o) => o.id === orgId)?.parent_id ?? null
+    while (current !== null && !seen.has(current)) {
+      chain.push(current)
+      seen.add(current)
+      current = this.organizations.find((o) => o.id === current)?.parent_id ?? null
+    }
+    return chain
   }
 
   canViewOrg(user, orgId) {
@@ -353,13 +442,38 @@ class MockServer {
   }
 
   /** 자산 하나의 공개 모양. 주소는 서버가 정한다(편집기가 규칙을 모르게). */
-  /** 소속 기관에서 위로 올라가 처음 만나는 '기관'. 커뮤니티가 걸린 자리다. */
+  /** 기관구분 이름의 동작 분류. 마스터에 없으면 '기타'. */
+  orgTypeCategory(name) {
+    return this.orgTypes.find((type) => type.name === name)?.category ?? '기타'
+  }
+
+  /** 가입 공통 — 미승인 상태로 만들고 MEMBER + 지정 역할을 단다. */
+  register(body, extraRoles) {
+    if (this.users.some((u) => u.user_id === body.user_id)) {
+      throw new ApiError(400, '이미 사용 중인 사용자ID 입니다.')
+    }
+    const user = {
+      id: this.nextId.user++,
+      user_id: body.user_id,
+      password: body.password,
+      name: body.name,
+      org_id: Number(body.org_id),
+      phone: body.phone ?? null,
+      email: body.email ?? null,
+      status: '미승인',
+      roles: ['MEMBER', ...extraRoles],
+    }
+    this.users.push(user)
+    return this.publicUser(user)
+  }
+
+  /** 소속 기관에서 위로 올라가 처음 만나는 '기관' 분류. 커뮤니티가 걸린 자리다. */
   communityOrgOf(user) {
     let org = this.organizations.find((o) => o.id === user.org_id) ?? null
     const seen = new Set()
     while (org && !seen.has(org.id)) {
       seen.add(org.id)
-      if (org.org_type === '기관') return org
+      if (this.orgTypeCategory(org.org_type) === '기관') return org
       org = this.organizations.find((o) => o.id === org.parent_id) ?? null
     }
     return null
@@ -402,79 +516,91 @@ class MockServer {
     }
   }
 
-  /** 칸이 전부 이 커뮤니티의 공유물인지 검사하고 저장 모양으로 만든다. */
-  cleanCommunityPlaylistItems(orgId, items) {
-    if (!items || items.length === 0) throw new ApiError(400, '칸을 하나 이상 담아야 합니다.')
-    return items.map((item) => {
-      const row = this.communityMedia.find(
-        (m) => m.org_id === orgId && m.asset.id === item.asset_id && m.asset.kind === item.kind,
-      )
-      if (!row) throw new ApiError(400, '커뮤니티에 공유된 이미지·동영상만 담을 수 있습니다.')
-      return {
-        kind: item.kind,
-        asset_id: item.asset_id,
-        duration_sec: item.duration_sec,
-        ...(item.transition && item.transition !== 'none'
-          ? { transition: item.transition, transition_ms: item.transition_ms ?? 600 }
-          : {}),
+  /** 칸을 검사하고 저장 모양으로 만든다 — 파일 칸은 올린 것만, QR 은 문구 필수. */
+  /** 칸(슬라이드) — 소속기관 공지와 같은 계약: 문서 인라인 + 유지 시간.
+   * 문서 안에 커뮤니티 위젯은 못 넣는다(끝없이 파고든다). 실서버와 같은 문구. */
+  cleanCommunityPlaylistItems(playlist, items) {
+    return (items ?? []).map((item) => {
+      const document = item.document
+      if (!document || typeof document !== 'object' || !Array.isArray(document.elements)) {
+        throw new ApiError(400, '칸에는 콘텐츠 문서가 있어야 합니다.')
       }
+      if (document.elements.some((el) => el?.type === 'widget' && el?.widget_key === 'community')) {
+        throw new ApiError(400, '커뮤니티 게시물 안에는 커뮤니티 위젯을 넣을 수 없습니다.')
+      }
+      const sec = Number(item.duration_sec)
+      if (!Number.isFinite(sec) || sec < 1 || sec > 86400) {
+        throw new ApiError(400, '표출 시간은 1~86400초여야 합니다.')
+      }
+      return { document: clone(document), duration_sec: sec }
     })
   }
 
-  /** 게시글에 파일들을 자산으로 담는다. 갈래가 다르면 거절 — 실제 서버와 같다. */
-  mockAddMediaFiles(user, post, files) {
-    for (const file of files) {
-      const kind = String(file.type || '').startsWith('video/') ? 'video' : 'image'
-      if (kind !== post.kind) {
-        throw new ApiError(400, '이 게시글에는 같은 갈래의 파일만 담을 수 있습니다.')
+  /** 기관구분 마스터가 허용하는 공지대상 토큰 — "학교"(전체) 또는 "학교:초"(세부 구분). */
+  allowedTargetTokens() {
+    const allowed = new Set()
+    for (const type of this.orgTypes) {
+      allowed.add(type.name)
+      for (const cls of (type.classifications ?? '').split(',')) {
+        if (cls.trim()) allowed.add(`${type.name}:${cls.trim()}`)
       }
     }
-    for (const file of files) {
-      const form = new FormData()
-      form.append('file', file)
-      const asset = this.mockAssetFromForm(user, form)
-      const row = {
-        id: this.nextId.communityMedia++,
-        org_id: post.org_id,
-        post_id: post.id,
-        asset_id: asset.id,
-        asset: this.publicAsset(asset),
+    return allowed
+  }
+
+  /** 공지대상은 기관구분 마스터의 이름(또는 이름:분류)만, 기간은 YYYY-MM-DD. */
+  validateCommunityMeta(body) {
+    const targets = body?.target_org_types
+    if (Array.isArray(targets) && targets.length) {
+      const allowed = this.allowedTargetTokens()
+      for (const name of targets) {
+        const trimmed = String(name).trim()
+        if (trimmed && !allowed.has(trimmed)) {
+          throw new ApiError(400, '공지대상은 기관구분에서 골라야 합니다.')
+        }
       }
-      this.communityMedia.push(row)
-      post.item_ids.push(row.id)
+    }
+    for (const value of [body?.notice_start, body?.notice_end]) {
+      if (value && !/^\d{4}-\d{2}-\d{2}$/.test(String(value).trim())) {
+        throw new ApiError(400, '공지희망기간은 YYYY-MM-DD 형식이어야 합니다.')
+      }
     }
   }
 
-  /** 게시글 응답 — 담긴 파일에 주소를 붙여 함께 준다. */
-  publicMediaPost(post) {
-    const items = post.item_ids
-      .map((id) => this.communityMedia.find((m) => m.id === id))
-      .filter(Boolean)
-      .map((m) => ({ id: m.id, asset: this.publicAsset(this.assets.find((a) => a.id === m.asset.id) ?? m.asset) }))
+  /** 오늘 날짜(로컬) "YYYY-MM-DD" — 공지희망기간 비교용. */
+  today() {
+    const now = new Date()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${now.getFullYear()}-${month}-${day}`
+  }
+
+  /** 저장된 칸에 화면이 그릴 이름·주소를 붙이고, 전체 재생시간(합)을 계산한다. */
+  publicCommunityPlaylist(playlist, user) {
+    // 표출할 칸 — 문서를 가진 칸만(옛 파일 참조·QR 칸은 표출하지 않는다).
+    const items = (playlist.items ?? [])
+      .filter((item) => item.document && typeof item.document === 'object')
+      .map((item) => ({ ...item }))
+    const canTouch =
+      user.roles.includes('SUPER_ADMIN') ||
+      user.roles.includes('ORG_ADMIN') ||
+      playlist.author_id === user.id
     return {
-      id: post.id,
-      kind: post.kind,
-      title: post.title,
-      description: post.description ?? '',
-      author_id: post.author_id,
-      author_name: post.author_name,
-      created_at: post.created_at,
+      ...playlist,
+      // 올린 파일 전부(올린 순서) — 편집기의 왼쪽 재료 칸이 쓴다.
+      assets: (playlist.assets ?? []).map((asset) => ({
+        id: asset.id,
+        kind: asset.kind,
+        filename: asset.filename,
+        url: asset.url,
+        thumb_url: asset.thumb_url,
+      })),
       items,
-      item_count: items.length,
-      can_remove: true,
+      total_duration_sec: items.reduce((sum, item) => sum + (Number(item.duration_sec) || 0), 0),
+      can_edit: canTouch,
+      can_remove: canTouch,
+      can_publish: this.canManageOrg(user, playlist.org_id),
     }
-  }
-
-  /** 저장된 칸에 화면이 그릴 이름·주소를 붙인다. 공유가 거둬진 것은 건너뛴다. */
-  publicCommunityPlaylist(playlist) {
-    const items = (playlist.items ?? []).flatMap((item) => {
-      const row = this.communityMedia.find(
-        (m) => m.org_id === playlist.org_id && m.asset.id === item.asset_id,
-      )
-      if (!row) return []
-      return [{ ...item, title: row.title || row.asset.filename, url: row.asset.url }]
-    })
-    return { ...playlist, items }
   }
 
   /** 이 파일을 쓰는 콘텐츠 수. 문서의 src 를 훑는다(서버는 색인을 쓴다). */
@@ -524,7 +650,24 @@ class MockServer {
     )
   }
 
-  contentSummary(content) {
+  /** 같은 상위기관 아래 기관들(자기 포함) — '소속기관' 공유 판정. */
+  siblingOrgIds(orgId) {
+    const org = this.organizations.find((o) => o.id === orgId)
+    if (!org || org.parent_id == null) return new Set([orgId])
+    const ids = this.organizations.filter((o) => o.parent_id === org.parent_id).map((o) => o.id)
+    return new Set([...ids, orgId])
+  }
+
+  /** 콘텐츠의 공유 구분이 orgId 기관에 열려 있는가(소유 범위와 무관). */
+  contentSharedWith(content, orgId) {
+    const scope = content.share_scope ?? '없음'
+    if (scope === '전체') return true
+    if (scope === '동일기관') return content.org_id === orgId
+    if (scope !== '소속기관') return false
+    return this.siblingOrgIds(orgId).has(content.org_id)
+  }
+
+  contentSummary(content, shared = false) {
     const document = content.document ?? {}
     return {
       id: content.id,
@@ -541,6 +684,8 @@ class MockServer {
       usage_count: this.contentUsage(content.id),
       element_count: (document.elements ?? []).length,
       background: (document.layout ?? {}).background ?? '#000000',
+      share_scope: content.share_scope ?? '없음',
+      shared,
     }
   }
 
@@ -580,9 +725,16 @@ class MockServer {
       end_time: item.end_time ?? null,
       sort_order: item.sort_order ?? index,
       duration_sec: item.duration_sec ?? 10,
-      content_id: item.content_id ?? null,
+      transition: item.transition ?? 'none',
+      transition_ms: item.transition_ms ?? 600,
+      org_notice_id: item.org_notice_id ?? null,
+      content_id: item.org_notice_id ? null : (item.content_id ?? null),
+      content_name:
+        item.org_notice_id != null
+          ? (this.orgNotices.find((n) => n.id === item.org_notice_id)?.name ?? null)
+          : (item.content_name ?? null),
       // 참조 방식이면 인라인 사본을 남기지 않는다(정본이 둘이 되면 안 된다).
-      content: item.content_id ? {} : (item.content ?? {}),
+      content: item.org_notice_id || item.content_id ? {} : (item.content ?? {}),
     }))
   }
 
@@ -679,10 +831,62 @@ class MockServer {
     return { items: items.slice(start, start + size), total: items.length, page, size }
   }
 
+  /** 역할 요구 — 없으면 403. 관리자 전용 라우트가 쓴다. */
+  requireRole(token, role, message) {
+    const user = this.requireUser(token)
+    if (!user.roles.includes(role)) throw new ApiError(403, message)
+    return user
+  }
+
   requireUser(token) {
     const user = this.sessions.get(token)
     if (!user) throw new ApiError(401, '인증 정보가 없습니다. 다시 로그인하세요.')
     return user
+  }
+
+  /**
+   * 실제 Pixabay 검색 — 백엔드 services/pixabay.py 와 같은 요청·응답 매핑.
+   * 안전 필터는 끄지 않는다(공공장소 표출 화면이다).
+   */
+  async pixabaySearch(params) {
+    const kind = params.kind === 'video' ? 'video' : 'image'
+    const perPage = Math.max(3, Math.min(Number(params.per_page) || 24, 200))
+    const query = new URLSearchParams({
+      key: this.pixabayKey,
+      q: params.q ?? '',
+      page: String(Number(params.page) || 1),
+      per_page: String(perPage),
+      safesearch: 'true',
+    })
+    if (kind === 'image') {
+      query.set('image_type', 'photo')
+      if (params.orientation === 'horizontal' || params.orientation === 'vertical') {
+        query.set('orientation', params.orientation)
+      }
+    }
+    const base = kind === 'image' ? 'https://pixabay.com/api/' : 'https://pixabay.com/api/videos/'
+
+    let response
+    try {
+      response = await fetch(`${base}?${query}`)
+    } catch {
+      throw new ApiError(502, '검색 서버에 연결할 수 없습니다.')
+    }
+    if (response.status === 429) {
+      throw new ApiError(429, '검색 호출 한도를 초과했습니다. 잠시 후 다시 시도하세요.')
+    }
+    if (!response.ok) throw new ApiError(502, '검색에 실패했습니다.')
+
+    const body = await response.json()
+    const hits = (body.hits ?? []).map((hit) =>
+      kind === 'image' ? pixabayImage(hit) : pixabayVideo(hit),
+    )
+    return {
+      items: hits.filter((hit) => hit.url),
+      total: body.totalHits ?? 0,
+      page: Number(params.page) || 1,
+      per_page: perPage,
+    }
   }
 
   // ---------------------------------------------------------------- 라우팅
@@ -695,7 +899,7 @@ class MockServer {
     if (!handler) {
       throw new ApiError(404, `테스트 모드에서 지원하지 않는 경로입니다: ${method} ${path}`)
     }
-    return clone(handler({ body, params: params ?? {}, token, ids }))
+    return clone(await handler({ body, params: params ?? {}, token, ids }))
   }
 
   routes() {
@@ -724,24 +928,7 @@ class MockServer {
         available: !this.users.some((u) => u.user_id === params.user_id),
       }),
 
-      'POST /auth/register': ({ body }) => {
-        if (this.users.some((u) => u.user_id === body.user_id)) {
-          throw new ApiError(400, '이미 사용 중인 사용자ID 입니다.')
-        }
-        const user = {
-          id: this.nextId.user++,
-          user_id: body.user_id,
-          password: body.password,
-          name: body.name,
-          org_id: body.org_id,
-          phone: body.phone ?? null,
-          email: body.email ?? null,
-          status: '미승인',
-          roles: ['MEMBER'],
-        }
-        this.users.push(user)
-        return this.publicUser(user)
-      },
+      'POST /auth/register': ({ body }) => this.register(body, []),
 
       'GET /auth/me': ({ token }) => this.publicUser(this.requireUser(token)),
 
@@ -759,6 +946,10 @@ class MockServer {
       'GET /organizations/public': ({ params }) => {
         let items = this.organizations
         if (params?.q) items = items.filter((o) => o.name.includes(params.q))
+        // 커뮤니티 가입 화면이 '기관' 분류만 받는 데 쓴다.
+        if (params?.category) {
+          items = items.filter((o) => this.orgTypeCategory(o.org_type) === params.category)
+        }
         if (params?.limit) items = items.slice(0, Number(params.limit))
         return items.map((o) => ({ id: o.id, name: o.name, parent_id: o.parent_id }))
       },
@@ -770,6 +961,140 @@ class MockServer {
         if (params.q) items = items.filter((o) => o.name.includes(params.q))
         // limit 은 검색 상자용이다. 안 주면 예전처럼 전부 돌려준다.
         return params.limit ? items.slice(0, Number(params.limit)) : items
+      },
+
+      // 일괄 삭제 — ids 또는 검색 조건. 단건 삭제와 같은 보호 규칙을
+      // 기관마다 적용하고, 막힌 기관만 건너뛴다.
+      'POST /organizations/bulk-delete': ({ token, body }) => {
+        const user = this.requireUser(token)
+        const scope = this.managedOrgIds(user)
+        const hasFilter = body?.q || body?.category || body?.parent_id != null
+        if (!body?.ids?.length && !hasFilter) {
+          throw new ApiError(400, '삭제할 대상을 지정하세요 (ids 또는 검색 조건).')
+        }
+        let targets
+        if (body?.ids?.length) {
+          targets = this.organizations.filter((o) => body.ids.includes(o.id))
+        } else {
+          targets = this.organizations
+          if (body.q) targets = targets.filter((o) => o.name.includes(body.q))
+          if (body.parent_id != null) {
+            targets = targets.filter((o) => o.parent_id === Number(body.parent_id))
+          }
+          if (body.category) {
+            const names = new Set(
+              this.orgTypes.filter((t) => t.category === body.category).map((t) => t.name),
+            )
+            targets = targets.filter((o) => names.has(o.org_type))
+          }
+        }
+        const blocked = new Set()
+        for (const org of targets) {
+          const protectedOrg =
+            org.parent_id == null ||
+            (scope !== null && !scope.has(org.id)) ||
+            this.organizations.some((o) => o.parent_id === org.id) ||
+            this.users.some((u) => u.org_id === org.id) ||
+            this.devices.some((d) => d.org_id === org.id)
+          if (protectedOrg) blocked.add(org.id)
+        }
+        const targetIds = new Set(targets.map((o) => o.id))
+        this.organizations = this.organizations.filter(
+          (o) => !targetIds.has(o.id) || blocked.has(o.id),
+        )
+        return {
+          deleted: targets.length - blocked.size,
+          skipped: blocked.size,
+          errors: blocked.size ? [`건너뛴 기관 ${blocked.size}건.`] : [],
+        }
+      },
+
+      // 페이지 목록 — 학교 정보 관리처럼 큰 목록용. category 는 기관구분의
+      // 분류(기관/학교/기타)로 거른다(이름이 바뀌어도 판정이 유지되도록).
+      'GET /organizations/paged': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const scope = this.managedOrgIds(user)
+        let items = this.organizations.filter((o) => scope === null || scope.has(o.id))
+        if (params?.q) items = items.filter((o) => o.name.includes(params.q))
+        if (params?.parent_id) {
+          items = items.filter((o) => o.parent_id === Number(params.parent_id))
+        }
+        if (params?.category) {
+          const names = new Set(
+            this.orgTypes.filter((t) => t.category === params.category).map((t) => t.name),
+          )
+          items = items.filter((o) => names.has(o.org_type))
+        }
+        items = [...items].sort((a, b) => a.name.localeCompare(b.name))
+        const page = Math.max(1, Number(params?.page ?? 1))
+        const size = Math.min(200, Math.max(1, Number(params?.size ?? 20)))
+        return {
+          items: items.slice((page - 1) * size, page * size),
+          total: items.length,
+          page,
+          size,
+        }
+      },
+
+      // 기관구분 마스터 — 이름 변경은 사용 중인 기관에 연쇄, 사용 중이면 삭제 불가.
+      'GET /org-types': ({ token }) => {
+        this.requireUser(token)
+        return this.orgTypes.map((type) => ({
+          ...type,
+          usage_count: this.organizations.filter((o) => o.org_type === type.name).length,
+        }))
+      },
+
+      'POST /org-types': ({ token, body }) => {
+        this.requireRole(token, 'SUPER_ADMIN', '기관구분을 관리할 권한이 없습니다.')
+        const name = (body.name ?? '').trim()
+        if (!name) throw new ApiError(400, '기관구분 이름은 1~20자여야 합니다.')
+        if (this.orgTypes.some((type) => type.name === name)) {
+          throw new ApiError(400, '이미 있는 기관구분 이름입니다.')
+        }
+        const row = {
+          id: this.nextId.orgType++,
+          name,
+          category: body.category ?? '기타',
+          classifications: body.classifications ?? '',
+        }
+        this.orgTypes.push(row)
+        return { ...row, usage_count: 0 }
+      },
+
+      'PUT /org-types/:id': ({ token, body, ids }) => {
+        this.requireRole(token, 'SUPER_ADMIN', '기관구분을 관리할 권한이 없습니다.')
+        const row = this.orgTypes.find((type) => type.id === ids[0])
+        if (!row) throw new ApiError(404, '기관구분을(를) 찾을 수 없습니다.')
+        if (body.category) row.category = body.category
+        if (body.classifications !== undefined) row.classifications = body.classifications
+        const name = body.name?.trim()
+        if (name && name !== row.name) {
+          if (this.orgTypes.some((type) => type.name === name && type.id !== row.id)) {
+            throw new ApiError(400, '이미 있는 기관구분 이름입니다.')
+          }
+          // 사용 중이어도 수정은 된다 — 그 구분을 쓰는 기관들을 함께 옮긴다.
+          for (const org of this.organizations.filter((o) => o.org_type === row.name)) {
+            org.org_type = name
+          }
+          row.name = name
+        }
+        return {
+          ...row,
+          usage_count: this.organizations.filter((o) => o.org_type === row.name).length,
+        }
+      },
+
+      'DELETE /org-types/:id': ({ token, ids }) => {
+        this.requireRole(token, 'SUPER_ADMIN', '기관구분을 관리할 권한이 없습니다.')
+        const row = this.orgTypes.find((type) => type.id === ids[0])
+        if (!row) throw new ApiError(404, '기관구분을(를) 찾을 수 없습니다.')
+        const used = this.organizations.filter((o) => o.org_type === row.name).length
+        if (used) {
+          throw new ApiError(400, `이 기관구분을 사용하는 기관이 ${used}곳 있어 삭제할 수 없습니다.`)
+        }
+        this.orgTypes = this.orgTypes.filter((type) => type.id !== row.id)
+        return { detail: '기관구분이 삭제되었습니다.' }
       },
 
       'GET /organizations/tree': ({ token }) => {
@@ -833,7 +1158,7 @@ class MockServer {
           throw new ApiError(403, '해당 기관을 삭제할 권한이 없습니다.')
         }
         const children = this.organizations.filter((o) => o.parent_id === org.id).length
-        if (children) throw new ApiError(400, `하위 기관이 ${children}건 있어 삭제할 수 없습니다.`)
+        if (children) throw new ApiError(400, `소속기관이 ${children}건 있어 삭제할 수 없습니다.`)
         const members = this.users.filter((u) => u.org_id === org.id).length
         if (members) throw new ApiError(400, `소속 사용자가 ${members}명 있어 삭제할 수 없습니다.`)
         const owned = this.devices.filter((d) => d.org_id === org.id).length
@@ -1254,13 +1579,63 @@ class MockServer {
       // ------------------------------------------------------------ 스톡 소재 검색
       // 테스트 모드는 바깥으로 나가지 않는다. 키도 없고, 폐쇄망일 수도 있다.
       // 대신 편집기가 결과를 어떻게 다루는지 볼 수 있게 가짜 결과를 만든다.
+      // ------------------------------------------------------------ Canva(목업)
+      // 실제 OAuth 는 백엔드가 한다. 목업은 '연결된 계정'을 가장해 화면 흐름만 보여 준다.
+      'GET /canva/status': ({ token }) => {
+        this.requireUser(token)
+        return { configured: true, connected: true }
+      },
+
+      'POST /canva/authorize': ({ token }) => {
+        this.requireUser(token)
+        return { url: 'https://www.canva.com/api/oauth/authorize?mock=1' }
+      },
+
+      'DELETE /canva/connection': ({ token }) => {
+        this.requireUser(token)
+        return { detail: 'Canva 연결을 해제했습니다.' }
+      },
+
+      'GET /canva/designs': ({ token, params }) => {
+        this.requireUser(token)
+        const q = params?.query ?? ''
+        const items = Array.from({ length: 8 }, (_, i) => ({
+          id: `canva-${i + 1}`,
+          title: q ? `${q} 디자인 ${i + 1}` : `학사 안내 디자인 ${i + 1}`,
+          thumbnail_url: mockPhoto(`canva ${q} ${i + 1}`, false, 240),
+          updated_at: Date.now(),
+        }))
+        return { items, continuation: null }
+      },
+
+      'POST /canva/import': ({ token, body }) => {
+        const user = this.requireUser(token)
+        const asset = {
+          id: this.nextId.asset++,
+          org_id: Number(body?.org_id) || user.org_id,
+          uploaded_by: user.id,
+          kind: 'image',
+          filename: `${body?.title ?? 'canva'}.png`,
+          content_type: 'image/png',
+          size_bytes: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          mock_url: mockPhoto(`canva ${body?.design_id ?? ''}`, false, 960),
+        }
+        this.assets.push(asset)
+        return [this.publicAsset(asset)]
+      },
+
       'GET /stock/status': ({ token }) => {
         this.requireUser(token)
         return { configured: true, provider: 'pixabay' }
       },
 
-      'GET /stock/search': ({ token, params }) => {
+      'GET /stock/search': async ({ token, params }) => {
         this.requireUser(token)
+        // 키가 있으면 브라우저가 Pixabay 를 직접 부른다(서버 프록시와 같은
+        // 필드 매핑 — services/pixabay.py 참조). 없으면 자리표시 그림.
+        if (this.pixabayKey) return this.pixabaySearch(params ?? {})
         const isVideo = params?.kind === 'video'
         const portrait = params?.orientation === 'vertical'
         const [w, h] = portrait ? [1080, 1620] : [1920, 1280]
@@ -1478,17 +1853,27 @@ class MockServer {
       'GET /contents': ({ token, params }) => {
         const user = this.requireUser(token)
         const scope = this.managedOrgIds(user)
-        let items = this.contents.filter((c) => scope === null || scope.has(c.org_id))
+        // 공유 판정의 기준 기관은 소비하는 쪽 — org_id 필터가 있으면 그 기관.
+        const consumerOrg = params.org_id ? Number(params.org_id) : user.org_id
+        const baseIds = params.org_id
+          ? this.descendantIds(Number(params.org_id))
+          : scope
+        const inBase = (c) => baseIds === null || baseIds.has(c.org_id)
+        const open = (c) => this.contentSharedWith(c, consumerOrg)
+
+        let items = this.contents.filter((c) => {
+          if (params.share === 'mine') return inBase(c)
+          if (params.share === 'shared') return open(c) && !(baseIds !== null && baseIds.has(c.org_id))
+          return inBase(c) || open(c)
+        })
         if (params.q) items = items.filter((c) => c.name.includes(params.q))
         if (params.orientation === 'portrait') items = items.filter((c) => c.height > c.width)
         if (params.orientation === 'landscape') items = items.filter((c) => c.height <= c.width)
-        if (params.org_id) {
-          const sub = this.descendantIds(Number(params.org_id))
-          items = items.filter((c) => sub.has(c.org_id))
-        }
         const sorted = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
         return this.paginate(
-          sorted.map((c) => this.contentSummary(c)),
+          sorted.map((c) =>
+            this.contentSummary(c, baseIds !== null && !baseIds.has(c.org_id)),
+          ),
           { page: params.page ?? 1, size: params.size ?? 24 },
         )
       },
@@ -1497,10 +1882,11 @@ class MockServer {
         const user = this.requireUser(token)
         const content = this.contents.find((c) => c.id === ids[0])
         if (!content) throw new ApiError(404, '콘텐츠을(를) 찾을 수 없습니다.')
-        if (!this.canViewOrg(user, content.org_id)) {
+        const own = this.canViewOrg(user, content.org_id)
+        if (!own && !this.contentSharedWith(content, user.org_id)) {
           throw new ApiError(403, '해당 콘텐츠를 조회할 권한이 없습니다.')
         }
-        return { ...this.contentSummary(content), document: clone(content.document) }
+        return { ...this.contentSummary(content, !own), document: clone(content.document) }
       },
 
       'POST /contents': ({ token, body }) => {
@@ -1520,6 +1906,7 @@ class MockServer {
           created_by: user.id,
           width,
           height,
+          share_scope: body.share_scope ?? '없음',
           version: 1,
           created_at: now,
           updated_at: now,
@@ -1540,7 +1927,7 @@ class MockServer {
         if (!this.canManageOrg(user, content.org_id) && content.created_by !== user.id) {
           throw new ApiError(403, '해당 콘텐츠를 수정할 권한이 없습니다.')
         }
-        for (const field of ['name', 'description', 'width', 'height', 'document']) {
+        for (const field of ['name', 'description', 'width', 'height', 'document', 'share_scope']) {
           if (body[field] !== undefined && body[field] !== null) content[field] = body[field]
         }
         content.version += 1
@@ -1569,6 +1956,7 @@ class MockServer {
           id: this.nextId.content++,
           name: `${source.name} (복사본)`,
           created_by: user.id,
+          share_scope: '없음', // 공유는 명시적인 행동 — 복사본이 몰래 공유되면 안 된다.
           version: 1,
           created_at: now,
           updated_at: now,
@@ -1605,6 +1993,150 @@ class MockServer {
         return this.boards.filter((b) => b.org_id === orgId)
       },
 
+      // ---------------------------------------------- 소속기관 공지
+      'GET /org-notices': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const orgName = (id) => this.organizations.find((o) => o.id === id)?.name ?? null
+        // for_org: 자기 것 + 상위기관이 내린 공지까지(스케줄 편집기용).
+        if (params.for_org) {
+          const target = Number(params.for_org)
+          if (!this.canViewOrg(user, target)) {
+            throw new ApiError(403, '해당 기관의 공지를 조회할 권한이 없습니다.')
+          }
+          const chain = this.ancestorIds(target)
+          const order = new Map(chain.map((id, at) => [id, at]))
+          return this.orgNotices
+            .filter((n) => order.has(n.org_id))
+            .sort((a, b) => order.get(a.org_id) - order.get(b.org_id))
+            .map((n) => ({
+              ...n, item_count: n.items.length, org_name: orgName(n.org_id), items: undefined,
+            }))
+        }
+        const orgId = params.org_id ? Number(params.org_id) : user.org_id
+        if (!this.canViewOrg(user, orgId)) {
+          throw new ApiError(403, '해당 기관의 공지를 조회할 권한이 없습니다.')
+        }
+        return this.orgNotices
+          .filter((n) => n.org_id === orgId)
+          .map((n) => ({
+            ...n, item_count: n.items.length, org_name: orgName(n.org_id), items: undefined,
+          }))
+      },
+
+      'GET /org-notices/:id': ({ token, ids }) => {
+        const user = this.requireUser(token)
+        const notice = this.orgNotices.find((n) => n.id === ids[0])
+        if (!notice) throw new ApiError(404, '공지을(를) 찾을 수 없습니다.')
+        // 상위기관이 내린 공지는 하위 기관도 읽는다(스케줄에 담기 위해).
+        if (
+          !this.canViewOrg(user, notice.org_id) &&
+          !this.ancestorIds(user.org_id).includes(notice.org_id)
+        ) {
+          throw new ApiError(403, '해당 공지를 조회할 권한이 없습니다.')
+        }
+        return { ...clone(notice), item_count: notice.items.length }
+      },
+
+      'POST /org-notices': ({ token, body }) => {
+        const user = this.requireUser(token)
+        const orgId = body.org_id ?? user.org_id
+        if (!this.canManageOrg(user, orgId)) {
+          throw new ApiError(403, '해당 기관에 공지를 만들 권한이 없습니다.')
+        }
+        const now = new Date().toISOString()
+        const notice = {
+          id: this.nextId.orgNotice++,
+          org_id: orgId,
+          name: body.name,
+          start_date: body.start_date ?? null,
+          end_date: body.end_date ?? null,
+          version: 1,
+          items: [],
+          created_at: now,
+          updated_at: now,
+        }
+        this.orgNotices.push(notice)
+        return { ...clone(notice), item_count: 0 }
+      },
+
+      'PUT /org-notices/:id': ({ token, body, ids }) => {
+        const user = this.requireUser(token)
+        const notice = this.orgNotices.find((n) => n.id === ids[0])
+        if (!notice) throw new ApiError(404, '공지을(를) 찾을 수 없습니다.')
+        if (!this.canManageOrg(user, notice.org_id)) {
+          throw new ApiError(403, '해당 공지를 수정할 권한이 없습니다.')
+        }
+        if (body.name !== undefined) notice.name = body.name
+        if (body.start_date !== undefined) notice.start_date = body.start_date || null
+        if (body.end_date !== undefined) notice.end_date = body.end_date || null
+        if (body.items !== undefined) {
+          notice.items = body.items.map((item, index) => ({
+            id: index + 1,
+            sort_order: index,
+            duration_sec: item.duration_sec ?? 10,
+            document: item.document ?? {},
+          }))
+        }
+        notice.version += 1
+        notice.updated_at = new Date().toISOString()
+        return { ...clone(notice), item_count: notice.items.length }
+      },
+
+      'DELETE /org-notices/:id': ({ token, ids }) => {
+        const user = this.requireUser(token)
+        const notice = this.orgNotices.find((n) => n.id === ids[0])
+        if (!notice) throw new ApiError(404, '공지을(를) 찾을 수 없습니다.')
+        if (!this.canManageOrg(user, notice.org_id)) {
+          throw new ApiError(403, '해당 공지를 삭제할 권한이 없습니다.')
+        }
+        this.orgNotices = this.orgNotices.filter((n) => n.id !== notice.id)
+        return { detail: '공지가 삭제되었습니다.' }
+      },
+
+      'POST /boards': ({ token, body }) => {
+        const user = this.requireUser(token)
+        if (!this.canManageOrg(user, body.org_id)) {
+          throw new ApiError(403, '해당 기관에 게시판을 등록할 권한이 없습니다.')
+        }
+        const board = {
+          id: this.nextId.board++,
+          org_id: body.org_id,
+          name: body.name ?? '',
+          kind: body.kind ?? '게시판',
+          url: body.url,
+          scrape_method: body.scrape_method ?? null,
+          scrape_result: null,
+          scrape_count: 0,
+          last_scraped_at: null,
+        }
+        this.boards.push(board)
+        return { ...board }
+      },
+
+      'PUT /boards/:id': ({ token, body, ids }) => {
+        const user = this.requireUser(token)
+        const board = this.boards.find((b) => b.id === ids[0])
+        if (!board) throw new ApiError(404, '게시판을(를) 찾을 수 없습니다.')
+        if (!this.canManageOrg(user, board.org_id)) {
+          throw new ApiError(403, '해당 게시판을 수정할 권한이 없습니다.')
+        }
+        for (const field of ['name', 'kind', 'url', 'scrape_method']) {
+          if (body[field] !== undefined) board[field] = body[field]
+        }
+        return { ...board }
+      },
+
+      'DELETE /boards/:id': ({ token, ids }) => {
+        const user = this.requireUser(token)
+        const board = this.boards.find((b) => b.id === ids[0])
+        if (!board) throw new ApiError(404, '게시판을(를) 찾을 수 없습니다.')
+        if (!this.canManageOrg(user, board.org_id)) {
+          throw new ApiError(403, '해당 게시판을 삭제할 권한이 없습니다.')
+        }
+        this.boards = this.boards.filter((b) => b.id !== board.id)
+        return { detail: '게시판이 삭제되었습니다.' }
+      },
+
       'GET /boards/:id/posts': ({ token, ids, params }) => {
         this.requireUser(token)
         const items = this.posts.filter((p) => p.board_id === ids[0])
@@ -1635,176 +2167,26 @@ class MockServer {
         const user = this.requireUser(token)
         const org = this.communityOrgOf(user)
         if (!org) throw new ApiError(404, '커뮤니티을(를) 찾을 수 없습니다.')
-        const canShare =
-          user.roles.includes('COMMUNITY_USER') ||
-          user.roles.includes('SUPER_ADMIN') ||
-          user.roles.includes('ORG_ADMIN')
-        return { org_id: org.id, org_name: org.name, can_share: canShare }
-      },
-
-      'GET /community/posts': ({ token, params }) => {
-        const user = this.requireUser(token)
-        const org = this.communityOrgOf(user)
-        const admin =
-          user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN')
-        const items = this.communityPosts
-          .filter((p) => p.org_id === org?.id)
-          .slice()
-          .reverse()
-          .map((p) => ({ ...p, publish_status: p.publish_status ?? '대기중', can_publish: admin }))
-        return this.paginate(items, params)
-      },
-
-      'PUT /community/posts/:id/status': ({ token, ids, body }) => {
-        const user = this.requireUser(token)
-        const admin =
-          user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN')
-        if (!admin) throw new ApiError(403, '게시 결과는 커뮤니티 소유 기관의 관리자만 설정할 수 있습니다.')
-        const post = this.communityPosts.find((p) => p.id === ids[0])
-        if (!post) throw new ApiError(404, '게시글을(를) 찾을 수 없습니다.')
-        if (!['대기중', '게시', '게시보류'].includes(body.status)) {
-          throw new ApiError(400, '게시 결과는 대기중·게시·게시보류 중 하나여야 합니다.')
-        }
-        post.publish_status = body.status
-        return { ...post, can_publish: true }
-      },
-
-      'POST /community/posts': ({ token, body }) => {
-        const user = this.requireUser(token)
-        const org = this.communityOrgOf(user)
-        const post = {
-          id: this.nextId.communityPost++,
-          org_id: org.id,
-          author_id: user.id,
-          author_name: user.name,
-          title: body.title,
-          content: body.content ?? null,
-          created_at: new Date().toISOString(),
-          attachments: [],
-          // 글은 늘 대기중으로 시작한다. 게시 여부는 관리자가 정한다.
-          publish_status: '대기중',
-          can_remove: true,
-          can_publish:
-            user.roles.includes('SUPER_ADMIN') || user.roles.includes('ORG_ADMIN'),
-        }
-        this.communityPosts.push(post)
-        return post
-      },
-
-      'POST /community/posts/:id/attachments': ({ token, ids, body }) => {
-        const user = this.requireUser(token)
-        const post = this.communityPosts.find((p) => p.id === ids[0])
-        if (!post) throw new ApiError(404, '게시글을(를) 찾을 수 없습니다.')
-        const asset = this.mockAssetFromForm(user, body)
-        post.attachments.push(this.publicAsset(asset))
-        return this.publicAsset(asset)
-      },
-
-      'DELETE /community/posts/:id': ({ token, ids }) => {
-        this.requireUser(token)
-        this.communityPosts = this.communityPosts.filter((p) => p.id !== ids[0])
-        return { detail: '글을 지웠습니다.' }
-      },
-
-      // 게시판 글에 붙인 파일이 곧 공유 재료다 — 낱개로 편 목록.
-      'GET /community/media': ({ token, params }) => {
-        const user = this.requireUser(token)
-        const org = this.communityOrgOf(user)
-        const kind = params?.kind ?? 'image'
-        const items = this.communityPosts
-          .filter((p) => p.org_id === org?.id)
-          .flatMap((p) =>
-            (p.attachments ?? [])
-              .filter((a) => a.kind === kind)
-              .map((a) => ({ id: a.id, title: p.title, asset: a })),
-          )
-          .reverse()
-        return this.paginate(items, params)
+        // 2026-10 개편: 커뮤니티는 모든 승인 사용자의 공간 — 누구나 올린다.
+        return { org_id: org.id, org_name: org.name, can_share: true }
       },
 
       'GET /community/list': ({ token }) => {
         const user = this.requireUser(token)
-        const canShare =
-          user.roles.includes('COMMUNITY_USER') ||
-          user.roles.includes('SUPER_ADMIN') ||
-          user.roles.includes('ORG_ADMIN')
+        const canShare = true
         // 슈퍼관리자는 모든 상위기관 커뮤니티를 쓴다.
         if (user.roles.includes('SUPER_ADMIN')) {
           return this.organizations
-            .filter((o) => o.org_type === '기관')
+            .filter((o) => this.orgTypeCategory(o.org_type) === '기관')
             .map((o) => ({ org_id: o.id, org_name: o.name, can_share: canShare }))
         }
         const org = this.communityOrgOf(user)
         return org ? [{ org_id: org.id, org_name: org.name, can_share: canShare }] : []
       },
 
-      'GET /community/contents': ({ token, params }) => {
-        const user = this.requireUser(token)
-        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
-        const items = this.communityContents
-          .filter((c) => c.org_id === orgId)
-          .slice()
-          .reverse()
-        return this.paginate(items, params)
-      },
-
-      'GET /community/contents/:id': ({ token, ids }) => {
-        this.requireUser(token)
-        const content = this.communityContents.find((c) => c.id === ids[0])
-        if (!content) throw new ApiError(404, '커뮤니티 콘텐츠을(를) 찾을 수 없습니다.')
-        return content
-      },
-
-      'POST /community/contents': ({ token, body, params }) => {
-        const user = this.requireUser(token)
-        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
-        const content = {
-          id: this.nextId.communityContent++,
-          org_id: orgId,
-          author_id: user.id,
-          author_name: user.name,
-          title: body.title,
-          version: 1,
-          created_at: new Date().toISOString(),
-          // CMS 콘텐츠와 같은 문서 계약. 비우면 빈 캔버스로 시작한다.
-          document: body.document ?? {
-            version: 1,
-            layout: { width: 1920, height: 1080, background: '#000000' },
-            elements: [],
-          },
-          element_count: (body.document?.elements ?? []).length,
-          start_date: null,
-          end_date: null,
-          audience: '전체',
-          can_remove: true,
-        }
-        this.communityContents.push(content)
-        return content
-      },
-
-      'PUT /community/contents/:id': ({ token, ids, body }) => {
-        this.requireUser(token)
-        const content = this.communityContents.find((c) => c.id === ids[0])
-        if (!content) throw new ApiError(404, '커뮤니티 콘텐츠을(를) 찾을 수 없습니다.')
-        if (body.title !== undefined && body.title !== null) content.title = body.title
-        if (body.document) {
-          content.document = body.document
-          content.element_count = (body.document.elements ?? []).length
-        }
-        // 빈 문자열은 '기간 지움'. undefined 는 '건드리지 않음' — 실제 서버와 같다.
-        if (body.start_date !== undefined) content.start_date = body.start_date || null
-        if (body.end_date !== undefined) content.end_date = body.end_date || null
-        if (body.audience !== undefined && body.audience !== null) {
-          if (!['전체', '초', '중', '고'].includes(body.audience)) {
-            throw new ApiError(400, '사용대상은 전체·초·중·고 중 하나여야 합니다.')
-          }
-          content.audience = body.audience
-        }
-        content.version += 1
-        return content
-      },
-
-      // -------------------------------------------------- 커뮤니티 재생목록
+      // -------------------------------------------------- 커뮤니티 게시물
+      // 외부 사용자가 게시를 원하는 것을 재생목록으로 등록한다(2026-09 개편).
+      // 파일은 재생목록에 직접 올리고, '게시' 상태만 위젯이 표출한다.
 
       'GET /community/playlists': ({ token, params }) => {
         const user = this.requireUser(token)
@@ -1813,48 +2195,188 @@ class MockServer {
           .filter((p) => p.org_id === orgId)
           .slice()
           .reverse()
-          .map((p) => this.publicCommunityPlaylist(p))
+          .map((p) => this.publicCommunityPlaylist(p, user))
         return this.paginate(items, params)
+      },
+
+      'GET /community/playlists/:id': ({ token, ids }) => {
+        const user = this.requireUser(token)
+        const playlist = this.communityPlaylists.find((p) => p.id === ids[0])
+        if (!playlist) throw new ApiError(404, '커뮤니티 게시물을(를) 찾을 수 없습니다.')
+        return this.publicCommunityPlaylist(playlist, user)
+      },
+
+      // 게시 정책 — 관리자가 켜면 '승인 없이' 등록 즉시 게시된다.
+      'GET /community/settings': ({ token, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        return {
+          auto_publish: this.communitySettings.get(orgId) ?? false,
+          can_manage: this.canManageOrg(user, orgId),
+        }
+      },
+
+      'PUT /community/settings': ({ token, body, params }) => {
+        const user = this.requireUser(token)
+        const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        if (!this.canManageOrg(user, orgId)) {
+          throw new ApiError(403, '게시 정책은 커뮤니티 소유 기관의 관리자만 설정할 수 있습니다.')
+        }
+        this.communitySettings.set(orgId, Boolean(body?.auto_publish))
+        return { auto_publish: this.communitySettings.get(orgId), can_manage: true }
       },
 
       'POST /community/playlists': ({ token, body, params }) => {
         const user = this.requireUser(token)
         const orgId = params?.org_id ? Number(params.org_id) : this.communityOrgOf(user)?.id
+        if (!body?.title?.trim?.()) throw new ApiError(422, '제목을 입력하세요.')
+        this.validateCommunityMeta(body)
+        const noticeStart = body.notice_start?.trim?.() || null
+        const noticeEnd = body.notice_end?.trim?.() || null
+        if (noticeStart && noticeEnd && noticeStart > noticeEnd) {
+          throw new ApiError(400, '공지희망기간의 시작이 종료보다 늦을 수 없습니다.')
+        }
         const playlist = {
           id: this.nextId.communityPlaylist++,
           org_id: orgId,
           author_id: user.id,
-          author_name: user.name,
-          name: body.name,
-          items: this.cleanCommunityPlaylistItems(orgId, body.items),
+          // 게시자가 적은 표시 이름이 먼저, 없으면 계정 이름.
+          author_name: body.author_name?.trim?.() || user.name,
+          contact: body.contact?.trim?.() || null,
+          title: body.title.trim(),
+          memo: body.memo?.trim?.() || null,
+          target_org_types: (body.target_org_types ?? [])
+            .map((name) => String(name).trim())
+            .filter(Boolean),
+          notice_start: noticeStart,
+          notice_end: noticeEnd,
+          // 게시 정책: 자동 게시가 켜진 커뮤니티는 승인 없이 곧장 '게시'다.
+          publish_status: this.communitySettings.get(orgId) ? '게시' : '대기중',
+          items: [],
+          assets: [],
           version: 1,
           created_at: new Date().toISOString(),
-          can_remove: true,
         }
         this.communityPlaylists.push(playlist)
-        return this.publicCommunityPlaylist(playlist)
+        return this.publicCommunityPlaylist(playlist, user)
+      },
+
+      // 로그인 팝업 — '게시' 중이고, 공지대상이 비었거나 내 기관의 기관구분을
+      // 포함하고, 공지희망기간 안인 글만.
+      'GET /community/popup': ({ token }) => {
+        const user = this.requireUser(token)
+        const org = this.communityOrgOf(user)
+        if (!org) return []
+        // 내 기관이 받을 수 있는 토큰: 구분 전체("학교")와 세부 구분("학교:초").
+        const myOrg = this.organizations.find((o) => o.id === user.org_id)
+        const myTokens = new Set(
+          myOrg
+            ? [myOrg.org_type, ...(myOrg.school_level ? [`${myOrg.org_type}:${myOrg.school_level}`] : [])]
+            : [],
+        )
+        const today = this.today()
+        return this.communityPlaylists
+          .filter((p) => p.org_id === org.id && p.publish_status === '게시')
+          .filter(
+            (p) =>
+              !(p.target_org_types ?? []).length ||
+              p.target_org_types.some((target) => myTokens.has(target)),
+          )
+          .filter((p) => !p.notice_start || today >= p.notice_start)
+          .filter((p) => !p.notice_end || today <= p.notice_end)
+          .slice()
+          .reverse()
+          .map((p) => ({
+            id: p.id,
+            org_id: org.id,
+            org_name: org.name,
+            title: p.title,
+            memo: p.memo ?? null,
+            contact: p.contact ?? null,
+            author_name: p.author_name ?? null,
+            target_org_types: p.target_org_types ?? [],
+            notice_start: p.notice_start ?? null,
+            notice_end: p.notice_end ?? null,
+          }))
+      },
+
+      // 파일은 재생목록에 직접 올린다 — 올린 파일만 칸이 될 수 있다.
+      'POST /community/playlists/:id/media': ({ token, ids, body }) => {
+        const user = this.requireUser(token)
+        const playlist = this.communityPlaylists.find((p) => p.id === ids[0])
+        if (!playlist) throw new ApiError(404, '커뮤니티 게시물을(를) 찾을 수 없습니다.')
+        const asset = this.publicAsset(this.mockAssetFromForm(user, body))
+        playlist.assets.push(asset)
+        return asset
       },
 
       'PUT /community/playlists/:id': ({ token, body, ids }) => {
-        this.requireUser(token)
+        const user = this.requireUser(token)
         const playlist = this.communityPlaylists.find((p) => p.id === ids[0])
-        if (!playlist) throw new ApiError(404, '커뮤니티 재생목록을(를) 찾을 수 없습니다.')
-        if (body.name !== undefined && body.name !== null) playlist.name = body.name
-        if (body.items) playlist.items = this.cleanCommunityPlaylistItems(playlist.org_id, body.items)
+        if (!playlist) throw new ApiError(404, '커뮤니티 게시물을(를) 찾을 수 없습니다.')
+        this.validateCommunityMeta(body)
+        if (body.title != null) playlist.title = body.title
+        if (body.memo != null) playlist.memo = body.memo || null
+        if (body.target_org_types != null) {
+          playlist.target_org_types = body.target_org_types
+            .map((name) => String(name).trim())
+            .filter(Boolean)
+        }
+        if (body.notice_start != null) playlist.notice_start = body.notice_start.trim?.() || null
+        if (body.notice_end != null) playlist.notice_end = body.notice_end.trim?.() || null
+        if (body.author_name != null) playlist.author_name = body.author_name || null
+        if (body.contact != null) playlist.contact = body.contact || null
+        if (body.items) playlist.items = this.cleanCommunityPlaylistItems(playlist, body.items)
+        // 기간은 한쪽만 고칠 수 있으니 최종 값으로 순서를 본다.
+        if (
+          playlist.notice_start &&
+          playlist.notice_end &&
+          playlist.notice_start > playlist.notice_end
+        ) {
+          throw new ApiError(400, '공지희망기간의 시작이 종료보다 늦을 수 없습니다.')
+        }
         playlist.version += 1
-        return this.publicCommunityPlaylist(playlist)
+        return this.publicCommunityPlaylist(playlist, user)
+      },
+
+      // 게시 결과 — 커뮤니티 소유 기관 관리자만. '게시'만 위젯이 표출한다.
+      'PUT /community/playlists/:id/status': ({ token, ids, body }) => {
+        const user = this.requireUser(token)
+        const playlist = this.communityPlaylists.find((p) => p.id === ids[0])
+        if (!playlist) throw new ApiError(404, '커뮤니티 게시물을(를) 찾을 수 없습니다.')
+        if (!this.canManageOrg(user, playlist.org_id)) {
+          throw new ApiError(403, '게시 결과는 커뮤니티 소유 기관의 관리자만 설정할 수 있습니다.')
+        }
+        if (!['대기중', '게시', '게시보류'].includes(body?.status)) {
+          throw new ApiError(400, '게시 결과는 대기중·게시·게시보류 중 하나여야 합니다.')
+        }
+        playlist.publish_status = body.status
+        playlist.version += 1
+        return this.publicCommunityPlaylist(playlist, user)
       },
 
       'DELETE /community/playlists/:id': ({ token, ids }) => {
         this.requireUser(token)
         this.communityPlaylists = this.communityPlaylists.filter((p) => p.id !== ids[0])
-        return { detail: '재생목록을 지웠습니다.' }
+        return { detail: '게시물을 지웠습니다.' }
       },
 
-      'DELETE /community/contents/:id': ({ token, ids }) => {
+      // 학교 일괄 등록 — 파일 내용을 해석하지 않고 한 건 등록으로 흉내낸다.
+      'POST /organizations/bulk-upload': ({ token, body, params }) => {
         this.requireUser(token)
-        this.communityContents = this.communityContents.filter((c) => c.id !== ids[0])
-        return { detail: '콘텐츠를 지웠습니다.' }
+        const file = body?.get?.('file') ?? null
+        if (!file) throw new ApiError(400, '파일을 선택하세요.')
+        const org = {
+          id: this.nextId.org++,
+          name: `업로드된 학교 ${this.nextId.org}`,
+          org_type: params?.default_org_type ?? '기관',
+          school_level: '초',
+          parent_id: Number(params?.parent_id),
+          address: null,
+          school_code: null,
+        }
+        this.organizations.push(org)
+        return { created: 1, updated: 0, skipped: 0, errors: [] }
       },
 
       'GET /widgets': ({ token }) => {
